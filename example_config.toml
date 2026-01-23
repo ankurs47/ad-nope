@@ -14,14 +14,14 @@ upstream_servers = [
 # Upstream Resolution Policy
 # resolution_policy = "parallel" | "sequential" | "round-robin"
 resolution_policy = "parallel"
-upstream_timeout_ms = 10000
+upstream_timeout_ms = 200
 
 # Bootstrap DNS
 # Used to resolve domain names in `upstream_servers`
 bootstrap_dns = ["8.8.8.8:53"]
 
 # Allowlist
-allowlist = ["analytics.google.com"]
+allowlist = []
 
 # Blocklists
 [blocklists]

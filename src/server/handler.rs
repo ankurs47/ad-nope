@@ -5,7 +5,10 @@ use crate::resolver::DnsResolver;
 use crate::stats::StatsCollector;
 use hickory_server::authority::MessageResponseBuilder;
 use hickory_server::proto::op::ResponseCode;
-use hickory_server::proto::rr::{RData, Record, RecordType};
+use hickory_server::proto::rr::{
+    rdata::{A, AAAA},
+    RData, Record, RecordType,
+};
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
 use moka::future::Cache;
 use std::sync::Arc;
@@ -179,6 +182,52 @@ impl DnsHandler {
         )
         .await
     }
+    async fn handle_local_records<R: ResponseHandler>(
+        &self,
+        request: &Request,
+        response_handle: R,
+        query: &QueryContext,
+    ) -> Result<ResponseInfo, R> {
+        if let Some(ip_str) = self.config.local_records.get(&query.name) {
+            let mut records = Vec::new();
+            if let Ok(ip_addr) = ip_str.parse::<std::net::IpAddr>() {
+                match (query.qtype, ip_addr) {
+                    (RecordType::A, std::net::IpAddr::V4(ipv4)) => {
+                        let rdata = RData::A(A(ipv4));
+                        let record =
+                            Record::from_rdata(request.queries()[0].name().into(), 300, rdata);
+                        records.push(record);
+                    }
+                    (RecordType::AAAA, std::net::IpAddr::V6(ipv6)) => {
+                        let rdata = RData::AAAA(AAAA(ipv6));
+                        let record =
+                            Record::from_rdata(request.queries()[0].name().into(), 300, rdata);
+                        records.push(record);
+                    }
+                    _ => {
+                        // Mismatch type (e.g. AAAA query for v4 IP) or other types.
+                        // Return NODATA (empty records).
+                    }
+                }
+            }
+
+            Ok(self
+                .serve_records(
+                    request,
+                    response_handle,
+                    records,
+                    query.clone(),
+                    LogContext {
+                        action: LogAction::Forwarded, // Or a new type
+                        source_id: None,
+                        upstream: Some("local-config".to_string()),
+                    },
+                )
+                .await)
+        } else {
+            Err(response_handle)
+        }
+    }
 
     async fn handle_blocked_request<R: ResponseHandler>(
         &self,
@@ -296,6 +345,14 @@ impl RequestHandler for DnsHandler {
         self.stats.inc_queries();
 
         let query_ctx = self.get_query_info(request).await;
+
+        let response_handle = match self
+            .handle_local_records(request, response_handle, &query_ctx)
+            .await
+        {
+            Ok(info) => return info,
+            Err(handle) => handle,
+        };
 
         let response_handle = match self
             .handle_blocked_request(request, response_handle, &query_ctx)

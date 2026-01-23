@@ -34,7 +34,7 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 COPY --from=builder /app/target/release/ad-nope .
-COPY config.toml .
+
 
 EXPOSE 5300/udp
 EXPOSE 5300/tcp

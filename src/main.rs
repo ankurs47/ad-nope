@@ -10,7 +10,6 @@ use tracing::info;
 use ad_nope::config::Config;
 use ad_nope::engine::{BlocklistManager, StandardManager};
 use ad_nope::logger::QueryLogger;
-// use ad_nope::resolver::UpstreamResolver;
 use ad_nope::server::DnsHandler;
 use ad_nope::stats::StatsCollector;
 use hickory_server::ServerFuture;
@@ -43,11 +42,7 @@ async fn main() -> Result<()> {
     }
 
     // 3. Init Stats & Logger
-    let upstream_names = if config.upstream_servers.is_empty() {
-        vec!["cloudflare-tls".to_string()]
-    } else {
-        config.upstream_servers.clone()
-    };
+    let upstream_names = config.upstream_servers.clone();
 
     // Use keys from sorted blocklists as friendly names
     let blocklist_names: Vec<String> = config
@@ -65,19 +60,6 @@ async fn main() -> Result<()> {
     // 4. Init Blocklist Manager & Fetch Initial Lists
     let manager = Arc::new(StandardManager::new(config.clone()));
     let initial_matcher = manager.refresh().await;
-    // We need a way to share the matcher with the handler and update it later.
-    // The handler currently takes Arc<dyn BlocklistMatcher>.
-    // To support updates, the Handler needs interior mutability or we need to restart the server?
-    // Restarting is bad.
-    // Ideally we use arc_swap or RwLock.
-    // Let's wrap the matcher in an Arc<RwLock<...>> or similar in the Handler,
-    // BUT Handler trait signatures are strict.
-    //
-    // SIMPLEST SOLUTION for now:
-    // The Handler will hold `Arc<arc_swap::ArcSwap<dyn BlocklistMatcher>>` (requires dependency)
-    // OR we just use `Arc<tokio::sync::RwLock<Arc<dyn BlocklistMatcher>>>`.
-    // Let's modify `server.rs` to support this dynamic update if we have time.
-    // For this MVP step, let's just use the static initial matcher.
 
     // 5. Init Upstream Resolver
     let upstream_resolver =

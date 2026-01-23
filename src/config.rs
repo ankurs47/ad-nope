@@ -11,7 +11,7 @@ pub struct Config {
     #[serde(default = "default_port")]
     pub port: u16,
 
-    #[serde(default)]
+    #[serde(default = "default_upstream_servers")]
     pub upstream_servers: Vec<String>,
 
     #[serde(default = "default_resolution_policy")]
@@ -20,10 +20,10 @@ pub struct Config {
     #[serde(default = "default_upstream_timeout_ms")]
     pub upstream_timeout_ms: u64,
 
-    #[serde(default)]
+    #[serde(default = "default_bootstrap_dns")]
     pub bootstrap_dns: Vec<String>,
 
-    #[serde(default)]
+    #[serde(default = "default_blocklists")]
     pub blocklists: HashMap<String, String>,
 
     #[serde(default)]
@@ -37,6 +37,9 @@ pub struct Config {
 
     #[serde(default)]
     pub logging: LoggingConfig,
+
+    #[serde(default)]
+    pub local_records: HashMap<String, String>,
 
     #[serde(default)]
     pub stats: StatsConfig,
@@ -99,7 +102,7 @@ fn default_resolution_policy() -> String {
     "parallel".to_string()
 }
 fn default_upstream_timeout_ms() -> u64 {
-    10000
+    200
 }
 fn default_cache_enable() -> bool {
     true
@@ -137,21 +140,37 @@ fn default_stats_enable() -> bool {
 fn default_log_interval() -> u64 {
     300
 }
+fn default_blocklists() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    m.insert(
+        "default".to_string(),
+        "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt"
+            .to_string(),
+    );
+    m
+}
+fn default_upstream_servers() -> Vec<String> {
+    vec!["h3://dns.google/dns-query".to_string()]
+}
+fn default_bootstrap_dns() -> Vec<String> {
+    vec!["8.8.8.8:53".to_string()]
+}
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             host: default_host(),
             port: default_port(),
-            upstream_servers: vec![],
+            upstream_servers: default_upstream_servers(),
             resolution_policy: default_resolution_policy(),
             upstream_timeout_ms: default_upstream_timeout_ms(),
-            bootstrap_dns: vec![],
-            blocklists: HashMap::new(),
+            bootstrap_dns: default_bootstrap_dns(),
+            blocklists: default_blocklists(),
             allowlist: vec![],
             cache: CacheConfig::default(),
             updates: UpdateConfig::default(),
             logging: LoggingConfig::default(),
+            local_records: HashMap::new(),
             stats: StatsConfig::default(),
         }
     }

@@ -46,13 +46,15 @@ dig @localhost -p 53 google.com
 
 ## ⚙️ Configuration
 
-ad-nope is configured via a `config.toml` file. You can mount your own configuration into the Docker container to customize behavior.
+ad-nope is configured via a TOML file. You can mount your own configuration into the Docker container to customize behavior.
 
 ### Default Configuration
 
-See [config.toml](config.toml) for the complete default configuration.
+See [example_config.toml](example_config.toml) for an example configuration.
 
 ### Mounting Custom Config
+
+To run with a custom configuration, mount your config file to `/app/config.toml` inside the container:
 
 ```bash
 docker run -d \
@@ -61,6 +63,23 @@ docker run -d \
   -p 53:5300/tcp \
   -v $(pwd)/my-config.toml:/app/config.toml \
   ankurs47/ad-nope:latest
+```
+
+### Docker Compose
+
+Create a `docker-compose.yml` file:
+
+```yaml
+version: '3'
+services:
+  ad-nope:
+    image: ankurs47/ad-nope:latest
+    ports:
+      - "53:5300/tcp"
+      - "53:5300/udp"
+    volumes:
+      - ./my-config.toml:/app/config.toml
+    restart: unless-stopped
 ```
 
 ### Key Settings
@@ -108,7 +127,7 @@ git clone https://github.com/ankurs47/ad-nope.git
 cd ad-nope
 
 # Run in development mode
-cargo run -- config.toml
+cargo run -- example_config.toml
 
 # Build release binary
 cargo build --release
