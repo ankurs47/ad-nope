@@ -35,12 +35,8 @@ impl DnsResolver for ParallelResolver {
             let ((res, url, idx), _index, remaining) = futures::future::select_all(futures).await;
             futures = remaining;
 
-            match res {
-                Ok(lookup) => {
-                    let latency = start.elapsed().as_millis() as u64;
-                    self.stats.record_upstream_latency(idx, latency);
-                    return Ok((lookup.records().to_vec(), url));
-                }
+            match crate::resolver::handle_lookup_result(res, &self.stats, idx, url.clone(), start) {
+                Ok(val) => return Ok(val),
                 Err(e) => {
                     error!("Upstream {} failed for {}: {}", url, name, e);
                 }

@@ -19,12 +19,14 @@ impl DnsResolver for SingleResolver {
         query_type: RecordType,
     ) -> Result<(Vec<hickory_resolver::proto::rr::Record>, String)> {
         let start = Instant::now();
-        match self.upstream.resolver.lookup(name, query_type).await {
-            Ok(lookup) => {
-                let latency = start.elapsed().as_millis() as u64;
-                self.stats.record_upstream_latency(0, latency);
-                Ok((lookup.records().to_vec(), self.upstream.url.clone()))
-            }
+        match crate::resolver::handle_lookup_result(
+            self.upstream.resolver.lookup(name, query_type).await,
+            &self.stats,
+            0,
+            self.upstream.url.clone(),
+            start,
+        ) {
+            Ok(val) => Ok(val),
             Err(e) => {
                 error!("Upstream {} failed for {}: {}", self.upstream.url, name, e);
                 Err(anyhow::anyhow!("Upstream failed for {}", name))

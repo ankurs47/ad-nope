@@ -14,6 +14,7 @@ use hickory_resolver::proto::xfer::Protocol;
 use hickory_resolver::Resolver;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::time::Instant;
 use tracing::{error, info};
 use url::Url;
 
@@ -191,4 +192,33 @@ async fn bootstrap_host(config: &Config, host: &str, port: u16) -> Result<Socket
         .context("No IP found for bootstrap host")?;
 
     Ok(SocketAddr::new(ip, port))
+}
+
+pub fn handle_lookup_result(
+    res: std::result::Result<hickory_resolver::lookup::Lookup, hickory_resolver::ResolveError>,
+    stats: &StatsCollector,
+    idx: usize,
+    url: String,
+    start: Instant,
+) -> std::result::Result<
+    (Vec<hickory_resolver::proto::rr::Record>, String),
+    hickory_resolver::ResolveError,
+> {
+    match res {
+        Ok(lookup) => {
+            let latency = start.elapsed().as_millis() as u64;
+            stats.record_upstream_latency(idx, latency);
+            Ok((lookup.records().to_vec(), url))
+        }
+        Err(e) => {
+            let err_str = e.to_string();
+            if err_str.contains("no records found") {
+                let latency = start.elapsed().as_millis() as u64;
+                stats.record_upstream_latency(idx, latency);
+                Ok((vec![], url))
+            } else {
+                Err(e)
+            }
+        }
+    }
 }

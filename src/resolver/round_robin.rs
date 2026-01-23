@@ -38,12 +38,14 @@ impl DnsResolver for RoundRobinResolver {
             let idx = (start_index + i) % self.upstreams.len();
             let upstream = &self.upstreams[idx];
 
-            match upstream.resolver.lookup(name, query_type).await {
-                Ok(lookup) => {
-                    let latency = start.elapsed().as_millis() as u64;
-                    self.stats.record_upstream_latency(idx, latency);
-                    return Ok((lookup.records().to_vec(), upstream.url.clone()));
-                }
+            match crate::resolver::handle_lookup_result(
+                upstream.resolver.lookup(name, query_type).await,
+                &self.stats,
+                idx,
+                upstream.url.clone(),
+                start,
+            ) {
+                Ok(val) => return Ok(val),
                 Err(e) => {
                     error!("Upstream {} failed for {}: {}", upstream.url, name, e);
                     continue;
