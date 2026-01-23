@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
 
@@ -16,11 +17,14 @@ pub struct Config {
     #[serde(default = "default_parallel_queries")]
     pub parallel_queries: bool,
 
+    #[serde(default = "default_upstream_timeout_ms")]
+    pub upstream_timeout_ms: u64,
+
     #[serde(default)]
     pub bootstrap_dns: Vec<String>,
 
     #[serde(default)]
-    pub blocklists: Vec<String>,
+    pub blocklists: HashMap<String, String>,
 
     #[serde(default)]
     pub allowlist: Vec<String>,
@@ -94,6 +98,9 @@ fn default_port() -> u16 {
 fn default_parallel_queries() -> bool {
     false
 }
+fn default_upstream_timeout_ms() -> u64 {
+    10000
+}
 fn default_cache_enable() -> bool {
     true
 }
@@ -138,8 +145,9 @@ impl Default for Config {
             port: default_port(),
             upstream_servers: vec![],
             parallel_queries: default_parallel_queries(),
+            upstream_timeout_ms: default_upstream_timeout_ms(),
             bootstrap_dns: vec![],
-            blocklists: vec![],
+            blocklists: HashMap::new(),
             allowlist: vec![],
             cache: CacheConfig::default(),
             updates: UpdateConfig::default(),
@@ -199,5 +207,15 @@ impl Config {
             .context("Failed to read config file")?;
         let config: Config = toml::from_str(&contents).context("Failed to parse config TOML")?;
         Ok(config)
+    }
+
+    pub fn get_blocklists_sorted(&self) -> Vec<(String, String)> {
+        let mut list: Vec<_> = self
+            .blocklists
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        list.sort_by(|a, b| a.0.cmp(&b.0));
+        list
     }
 }

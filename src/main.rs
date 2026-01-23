@@ -26,12 +26,16 @@ async fn main() -> Result<()> {
     };
 
     // 1. Setup Logging (Tracing)
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.logging.level)),
-        )
-        .init();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        let mut filter = config.logging.level.clone();
+        // Reduce noise from hickory_proto (H3/QUIC timeouts) unless explicitly set
+        if !filter.contains("hickory_proto") {
+            filter.push_str(",hickory_proto=error");
+        }
+        tracing_subscriber::EnvFilter::new(filter)
+    });
+
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
     info!("Starting AdNope...");
 
     if !std::path::Path::new(&config_path).exists() {
@@ -39,9 +43,25 @@ async fn main() -> Result<()> {
     }
 
     // 3. Init Stats & Logger
-    let stats = StatsCollector::new(config.stats.log_interval_seconds);
-    let logger = QueryLogger::new(config.logging.clone());
+    let upstream_names = if config.upstream_servers.is_empty() {
+        vec!["cloudflare-tls".to_string()]
+    } else {
+        config.upstream_servers.clone()
+    };
 
+    // Use keys from sorted blocklists as friendly names
+    let blocklist_names: Vec<String> = config
+        .get_blocklists_sorted()
+        .into_iter()
+        .map(|(name, _url)| name)
+        .collect();
+
+    let stats = StatsCollector::new(
+        config.stats.log_interval_seconds,
+        upstream_names,
+        blocklist_names.clone(),
+    );
+    let logger = QueryLogger::new(config.logging.clone(), blocklist_names);
     // 4. Init Blocklist Manager & Fetch Initial Lists
     let manager = Arc::new(StandardManager::new(config.clone()));
     let initial_matcher = manager.refresh().await;

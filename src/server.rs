@@ -121,6 +121,7 @@ impl RequestHandler for DnsHandler {
                     query_type: qtype.to_string(),
                     action: LogAction::Blocked,
                     source_id: Some(source_id),
+                    upstream: None,
                     latency_ms: start.elapsed().as_millis() as u64,
                 })
                 .await;
@@ -150,6 +151,7 @@ impl RequestHandler for DnsHandler {
                         query_type: qtype.to_string(),
                         action: LogAction::Cached,
                         source_id: None,
+                        upstream: None,
                         latency_ms: start.elapsed().as_millis() as u64,
                     })
                     .await;
@@ -183,7 +185,7 @@ impl RequestHandler for DnsHandler {
 
         // 3. Resolve Upstream
         match self.resolver.resolve(&name_str, qtype).await {
-            Ok(records) => {
+            Ok((records, upstream_name)) => {
                 // let records = lookup.records().to_vec(); // Now returns Vec<Record> directly
 
                 // Cache it
@@ -213,6 +215,7 @@ impl RequestHandler for DnsHandler {
                         query_type: qtype.to_string(),
                         action: LogAction::Forwarded,
                         source_id: None,
+                        upstream: Some(upstream_name),
                         latency_ms: start.elapsed().as_millis() as u64,
                     })
                     .await;
@@ -222,7 +225,10 @@ impl RequestHandler for DnsHandler {
             Err(e) => {
                 error!("Upstream resolution failed for {}: {}", name_str, e);
                 // ServFail
+                header.set_response_code(ResponseCode::NXDomain); // Or ServFail? usually DNS filters return NXDomain or 0.0.0.0 for blocked, but this is a failure.
+                                                                  // Reverting to ServFail as per previous code
                 header.set_response_code(ResponseCode::ServFail);
+
                 let builder = MessageResponseBuilder::from_message_request(request);
                 let response = builder.build(header, &[], &[], &[], &[]);
                 response_handle

@@ -23,12 +23,18 @@ pub struct StatsCollector {
     // We'll just separate TotalTime and Count arrays.
     upstream_total_ms: [AtomicU64; 16],
     upstream_count: [AtomicU64; 16],
+    upstream_names: Vec<String>,
+    blocklist_names: Vec<String>,
 
     log_interval: Duration,
 }
 
 impl StatsCollector {
-    pub fn new(log_interval_sec: u64) -> Arc<Self> {
+    pub fn new(
+        log_interval_sec: u64,
+        upstream_names: Vec<String>,
+        blocklist_names: Vec<String>,
+    ) -> Arc<Self> {
         let stats = Arc::new(Self {
             total_queries: AtomicU64::new(0),
             blocked_queries: AtomicU64::new(0),
@@ -36,6 +42,8 @@ impl StatsCollector {
             blocks_by_source: [0; 256].map(|_| AtomicU64::new(0)),
             upstream_total_ms: [0; 16].map(|_| AtomicU64::new(0)),
             upstream_count: [0; 16].map(|_| AtomicU64::new(0)),
+            upstream_names,
+            blocklist_names,
             log_interval: Duration::from_secs(log_interval_sec),
         });
 
@@ -91,12 +99,35 @@ impl StatsCollector {
             if count > 0 {
                 let total_ms = self.upstream_total_ms[i].load(Ordering::Relaxed);
                 let avg = total_ms as f64 / count as f64;
-                upstream_stats.push_str(&format!("[U{}: {:.1}ms] ", i, avg));
+
+                let name = self
+                    .upstream_names
+                    .get(i)
+                    .map(|s| s.as_str())
+                    .unwrap_or("Unknown");
+                upstream_stats.push_str(&format!("[{}: {:.1}ms] ", name, avg));
+            }
+        }
+
+        let mut block_stats = String::new();
+        if blocked > 0 {
+            block_stats.push_str(" BlockStats: ");
+            for i in 0..256 {
+                let count = self.blocks_by_source[i].load(Ordering::Relaxed);
+                if count > 0 {
+                    let name = self
+                        .blocklist_names
+                        .get(i)
+                        .map(|s| s.as_str())
+                        .unwrap_or("Unknown");
+                    let pct = (count as f64 / blocked as f64) * 100.0;
+                    block_stats.push_str(&format!("[{}: {} ({:.1}%)] ", name, count, pct));
+                }
             }
         }
 
         info!(
-            "STATS DUMP: Total: {}, Blocked: {} ({:.1}%), CacheHits: {} ({:.1}%), Upstreams: {}",
+            "STATS DUMP: Total: {}, Blocked: {} ({:.1}%), CacheHits: {} ({:.1}%), Upstreams: {}{}",
             total,
             blocked,
             if total > 0 {
@@ -110,7 +141,8 @@ impl StatsCollector {
             } else {
                 0.0
             },
-            upstream_stats
+            upstream_stats,
+            block_stats
         );
     }
 }

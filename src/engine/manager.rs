@@ -35,13 +35,26 @@ impl StandardManager {
         entries
     }
 
-    async fn fetch_and_parse(client: &Client, url: String, source_id: u8) -> Vec<(String, u8)> {
-        info!("Fetching blocklist [{}] from {}", source_id, url);
+    async fn fetch_and_parse(
+        client: &Client,
+        name: String,
+        url: String,
+        source_id: u8,
+    ) -> Vec<(String, u8)> {
+        info!(
+            "Fetching blocklist '{}' (ID {}) from {}",
+            name, source_id, url
+        );
         match client.get(&url).send().await {
             Ok(resp) => match resp.text().await {
                 Ok(text) => {
                     let entries = Self::parse_blocklist_content(&text, source_id);
-                    info!("Parsed {} entries from source {}", entries.len(), source_id);
+                    info!(
+                        "Parsed {} entries from '{}' (ID {})",
+                        entries.len(),
+                        name,
+                        source_id
+                    );
                     entries
                 }
                 Err(e) => {
@@ -63,13 +76,18 @@ impl BlocklistManager for StandardManager {
         info!("Refreshing blocklists...");
 
         let client = self.client.clone();
-        let urls = self.config.blocklists.clone();
+        // Use sorted list to ensure deterministic source IDs
+        let blocklists = self.config.get_blocklists_sorted();
 
-        let tasks = urls.into_iter().enumerate().map(|(idx, url)| {
-            let client = client.clone();
-            let source_id = if idx > 255 { 255 } else { idx as u8 };
-            async move { Self::fetch_and_parse(&client, url, source_id).await }
-        });
+        let tasks = blocklists
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (name, url))| {
+                let client = client.clone();
+                // Source ID matches the index in the sorted list (0-255)
+                let source_id = if idx > 255 { 255 } else { idx as u8 };
+                async move { Self::fetch_and_parse(&client, name, url.clone(), source_id).await }
+            });
 
         let results: Vec<Vec<(String, u8)>> = stream::iter(tasks)
             .buffer_unordered(self.config.updates.concurrent_downloads)

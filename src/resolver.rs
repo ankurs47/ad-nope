@@ -19,41 +19,73 @@ pub trait DnsResolver: Send + Sync {
         &self,
         name: &str,
         query_type: hickory_resolver::proto::rr::RecordType,
-    ) -> Result<Vec<hickory_resolver::proto::rr::Record>>;
+    ) -> Result<(Vec<hickory_resolver::proto::rr::Record>, String)>;
+}
+
+pub struct Upstream {
+    pub url: String,
+    pub resolver: TokioResolver,
 }
 
 pub struct UpstreamResolver {
-    resolver: TokioResolver,
+    upstreams: Vec<Upstream>,
+    parallel: bool,
     stats: Arc<StatsCollector>,
 }
 
 impl UpstreamResolver {
     pub async fn new(config: Config, stats: Arc<StatsCollector>) -> Result<Self> {
-        let mut resolver_config = ResolverConfig::new();
+        let mut upstreams = Vec::new();
 
         // Custom Upstreams
         if config.upstream_servers.is_empty() {
             info!("No upstream servers configured, using Cloudflare/Google default.");
-            resolver_config = ResolverConfig::cloudflare_tls();
+            let mut opts = ResolverOpts::default();
+            opts.cache_size = 0;
+            opts.timeout = std::time::Duration::from_millis(config.upstream_timeout_ms);
+
+            let resolver = Resolver::builder_with_config(
+                ResolverConfig::cloudflare_tls(),
+                TokioConnectionProvider::default(),
+            )
+            .with_options(opts)
+            .build();
+
+            upstreams.push(Upstream {
+                url: "cloudflare-tls".to_string(),
+                resolver,
+            });
         } else {
             for (idx, upstream_url) in config.upstream_servers.iter().enumerate() {
-                // Parse URL: udp://1.1.1.1:53 or https://dns.google/dns-query
-                // NOTE: Hickory Config requires IP addresses for NameServerConfig usually.
-                // If the user configured a hostname (e.g. tls://dns.google), we must resolve it first using Bootstrap DNS.
-
+                // ... same logic to build ns_cfg ...
                 let url = Url::parse(upstream_url).context("Failed to parse upstream URL")?;
-                let port = url.port().unwrap_or(53);
+
+                let protocol = match url.scheme() {
+                    "udp" => Protocol::Udp,
+                    "tcp" => Protocol::Tcp,
+                    "tls" => Protocol::Tls,
+                    "https" => Protocol::Https,
+                    "quic" => Protocol::Quic,
+                    "h3" => Protocol::H3,
+                    _ => Protocol::Udp,
+                };
+
+                let port = url.port().unwrap_or(match protocol {
+                    Protocol::Udp | Protocol::Tcp => 53,
+                    Protocol::Tls => 853,
+                    Protocol::Https | Protocol::H3 => 443,
+                    Protocol::Quic => 853,
+                    _ => 53,
+                });
+
                 let host_str = url.host_str().unwrap_or("0.0.0.0");
 
-                // Resolve IP if needed
                 let socket_addr: SocketAddr = if let Ok(addr) = host_str.parse() {
                     SocketAddr::new(addr, port)
                 } else {
-                    // Start a temporary bootstrap resolver
                     let bootstrap_config = if config.bootstrap_dns.is_empty() {
                         ResolverConfig::google()
                     } else {
-                        // Build config from bootstrap IPs
                         let mut cfg = ResolverConfig::new();
                         for ip in &config.bootstrap_dns {
                             if let Ok(sa) = ip.parse::<SocketAddr>() {
@@ -85,19 +117,7 @@ impl UpstreamResolver {
                     }
                 };
 
-                let protocol = match url.scheme() {
-                    "udp" => Protocol::Udp,
-                    "tcp" => Protocol::Tcp,
-                    "tls" => Protocol::Tls,
-                    "https" => Protocol::Https,
-                    "quic" => Protocol::Quic,
-                    "h3" => Protocol::H3,
-                    _ => Protocol::Udp,
-                };
-
                 let mut ns_cfg = NameServerConfig::new(socket_addr, protocol);
-
-                // For TLS/HTTPS/QUIC/H3, we need the tls_dns_name (SNI)
                 if matches!(
                     protocol,
                     Protocol::Tls | Protocol::Https | Protocol::Quic | Protocol::H3
@@ -105,7 +125,25 @@ impl UpstreamResolver {
                     ns_cfg.tls_dns_name = Some(host_str.to_string());
                 }
 
+                let mut resolver_config = ResolverConfig::new();
                 resolver_config.add_name_server(ns_cfg);
+
+                let mut opts = ResolverOpts::default();
+                opts.cache_size = 0;
+                opts.timeout = std::time::Duration::from_millis(config.upstream_timeout_ms);
+
+                let resolver = Resolver::builder_with_config(
+                    resolver_config,
+                    TokioConnectionProvider::default(),
+                )
+                .with_options(opts)
+                .build();
+
+                upstreams.push(Upstream {
+                    url: upstream_url.clone(),
+                    resolver,
+                });
+
                 info!(
                     "Added upstream: [{}] {} ({})",
                     idx, upstream_url, socket_addr
@@ -113,17 +151,12 @@ impl UpstreamResolver {
             }
         }
 
-        let mut opts = ResolverOpts::default();
-        opts.cache_size = 0; // We define our own cache layer
-
-        let mut builder =
-            Resolver::builder_with_config(resolver_config, TokioConnectionProvider::default());
-        *builder.options_mut() = opts;
-        let resolver = builder.build();
-        Ok(Self { resolver, stats })
+        Ok(Self {
+            upstreams,
+            parallel: config.parallel_queries,
+            stats,
+        })
     }
-
-    // Moving logic to trait impl
 }
 
 #[async_trait::async_trait]
@@ -132,16 +165,56 @@ impl DnsResolver for UpstreamResolver {
         &self,
         name: &str,
         query_type: hickory_resolver::proto::rr::RecordType,
-    ) -> Result<Vec<hickory_resolver::proto::rr::Record>> {
+    ) -> Result<(Vec<hickory_resolver::proto::rr::Record>, String)> {
         let start = Instant::now();
-        let res = self.resolver.lookup(name, query_type).await;
-        let latency = start.elapsed().as_millis() as u64;
 
-        self.stats.record_upstream_latency(0, latency);
+        if self.parallel && self.upstreams.len() > 1 {
+            let mut futures = Vec::new();
+            for (idx, upstream) in self.upstreams.iter().enumerate() {
+                let name = name.to_string();
+                let f = async move {
+                    let res = upstream.resolver.lookup(name, query_type).await;
+                    (res, upstream.url.clone(), idx)
+                };
+                futures.push(Box::pin(f));
+            }
 
-        match res {
-            Ok(lookup) => Ok(lookup.records().to_vec()),
-            Err(e) => Err(anyhow::anyhow!("Resolution failed: {}", e)),
+            // We need to handle failures: if one fails, we should wait for others.
+            // But select_all returns the first one that completes.
+            let mut futures = futures;
+            while !futures.is_empty() {
+                let ((res, url, idx), _index, remaining) =
+                    futures::future::select_all(futures).await;
+                futures = remaining;
+
+                match res {
+                    Ok(lookup) => {
+                        let latency = start.elapsed().as_millis() as u64;
+                        self.stats.record_upstream_latency(idx, latency);
+                        return Ok((lookup.records().to_vec(), url));
+                    }
+                    Err(e) => {
+                        error!("Upstream {} failed for {}: {}", url, name, e);
+                    }
+                }
+            }
+            Err(anyhow::anyhow!("All upstreams failed for {}", name))
+        } else {
+            // Serial
+            for (idx, upstream) in self.upstreams.iter().enumerate() {
+                match upstream.resolver.lookup(name, query_type).await {
+                    Ok(lookup) => {
+                        let latency = start.elapsed().as_millis() as u64;
+                        self.stats.record_upstream_latency(idx, latency);
+                        return Ok((lookup.records().to_vec(), upstream.url.clone()));
+                    }
+                    Err(e) => {
+                        error!("Upstream {} failed for {}: {}", upstream.url, name, e);
+                        continue;
+                    }
+                }
+            }
+            Err(anyhow::anyhow!("All upstreams failed for {}", name))
         }
     }
 }

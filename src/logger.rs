@@ -10,6 +10,7 @@ pub struct LogEntry {
     pub query_type: String,
     pub action: LogAction,
     pub source_id: Option<u8>, // If blocked
+    pub upstream: Option<String>,
     pub latency_ms: u64,
 }
 
@@ -26,13 +27,13 @@ pub struct QueryLogger {
 }
 
 impl QueryLogger {
-    pub fn new(config: LoggingConfig) -> Arc<Self> {
+    pub fn new(config: LoggingConfig, blocklist_names: Vec<String>) -> Arc<Self> {
         let (tx, mut rx) = mpsc::channel(1000); // Buffer up to 1000 logs
 
         // Spawn async logger task
         tokio::spawn(async move {
             while let Some(entry) = rx.recv().await {
-                Self::process_log(&config, entry);
+                Self::process_log(&config, &blocklist_names, entry);
             }
         });
 
@@ -44,7 +45,7 @@ impl QueryLogger {
         let _ = self.tx.try_send(entry);
     }
 
-    fn process_log(config: &LoggingConfig, entry: LogEntry) {
+    fn process_log(config: &LoggingConfig, blocklist_names: &[String], entry: LogEntry) {
         if !config.enable {
             return;
         }
@@ -56,6 +57,11 @@ impl QueryLogger {
 
         if should_log {
             if config.format == "json" {
+                // Resolve source name if blocked
+                let src_name = entry
+                    .source_id
+                    .and_then(|id| blocklist_names.get(id as usize));
+
                 // Structured JSON logging via tracing
                 info!(
                     target: "dns_query",
@@ -63,16 +69,30 @@ impl QueryLogger {
                     domain = %entry.domain,
                     type = %entry.query_type,
                     action = ?entry.action,
-                    src = ?entry.source_id,
+                    src_id = ?entry.source_id,
+                    src_name = ?src_name,
+                    upstream = ?entry.upstream,
                     lat = %entry.latency_ms
                 );
             } else {
                 // Text format
                 let action_str = match entry.action {
-                    LogAction::Blocked => format!("BLOCKED[src={:?}]", entry.source_id),
+                    LogAction::Blocked => {
+                        let name = entry
+                            .source_id
+                            .and_then(|id| blocklist_names.get(id as usize).map(|s| s.as_str()))
+                            .unwrap_or("Unknown");
+                        format!("BLOCKED[{}]", name)
+                    }
                     LogAction::Allowed => "ALLOWED".to_string(),
                     LogAction::Cached => "CACHED".to_string(),
-                    LogAction::Forwarded => "FORWARDED".to_string(),
+                    LogAction::Forwarded => {
+                        if let Some(ref up) = entry.upstream {
+                            format!("FORWARDED[{}]", up)
+                        } else {
+                            "FORWARDED".to_string()
+                        }
+                    }
                 };
 
                 info!(
