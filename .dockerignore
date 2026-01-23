@@ -1,0 +1,5 @@
+target/
+.git/
+Dockerfile
+.pre-commit-config.yaml
+Cargo.lock
