@@ -21,8 +21,10 @@ hickory-resolver = { version = "0.25.2", features = [
 
 
 # Serialization & Config
+# Serialization & Config
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
+rusqlite = { version = "0.38", features = ["bundled"] }
 
 # HTTP Client
 reqwest = { version = "0.13.1", default-features = false, features = [

@@ -83,6 +83,10 @@ pub struct LoggingConfig {
     pub syslog_addr: Option<String>,
     #[serde(default = "default_query_log_sinks")]
     pub query_log_sinks: Vec<String>,
+    #[serde(default = "default_sqlite_path")]
+    pub sqlite_path: String,
+    #[serde(default = "default_sqlite_retention_hours")]
+    pub sqlite_retention_hours: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -141,6 +145,12 @@ fn default_log_level() -> String {
 }
 fn default_query_log_sinks() -> Vec<String> {
     vec!["console".to_string()]
+}
+fn default_sqlite_path() -> String {
+    "ad-nope.db".to_string()
+}
+fn default_sqlite_retention_hours() -> u64 {
+    168 // 7 days
 }
 fn default_stats_enable() -> bool {
     true
@@ -215,6 +225,8 @@ impl Default for LoggingConfig {
             file_path: None,
             syslog_addr: None,
             query_log_sinks: default_query_log_sinks(),
+            sqlite_path: default_sqlite_path(),
+            sqlite_retention_hours: default_sqlite_retention_hours(),
         }
     }
 }

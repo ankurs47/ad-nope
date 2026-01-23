@@ -62,8 +62,11 @@ docker run -d \
   -p 53:5300/udp \
   -p 53:5300/tcp \
   -v $(pwd)/my-config.toml:/app/config.toml \
+  -v $(pwd)/data:/app/data \
   ankurs47/ad-nope:latest
 ```
+
+> **Note**: For SQLite logging, ensure your config points `sqlite_path` to the mounted volume, e.g., `sqlite_path = "/app/data/ad-nope.db"`.
 
 ### Docker Compose
 
@@ -79,6 +82,7 @@ services:
       - "53:5300/udp"
     volumes:
       - ./my-config.toml:/app/config.toml
+      - ./data:/app/data
     restart: unless-stopped
 ```
 

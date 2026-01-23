@@ -1,7 +1,9 @@
 pub mod console_sink;
+pub mod sqlite_sink;
 pub mod types;
 
 pub use self::console_sink::ConsoleLogSink;
+pub use self::sqlite_sink::SqliteLogSink;
 pub use self::types::{QueryLogAction, QueryLogEntry, QueryLogSink};
 
 use crate::config::LoggingConfig;
@@ -21,6 +23,17 @@ impl QueryLogger {
                 let (tx, mut rx) = mpsc::channel(1000);
                 let console_sink = ConsoleLogSink::new(config.clone(), blocklist_names.clone());
                 let sink = Box::new(console_sink);
+
+                tokio::spawn(async move {
+                    while let Some(entry) = rx.recv().await {
+                        sink.log(&entry);
+                    }
+                });
+                sinks.push(tx);
+            } else if sink_type == "sqlite" {
+                let (tx, mut rx) = mpsc::channel(1000);
+                let sqlite_sink = SqliteLogSink::new(config.clone(), blocklist_names.clone());
+                let sink = Box::new(sqlite_sink);
 
                 tokio::spawn(async move {
                     while let Some(entry) = rx.recv().await {

@@ -12,6 +12,8 @@ async fn test_logging_config_instantiation() {
         file_path: None,
         syslog_addr: None,
         query_log_sinks: vec!["console".to_string()],
+        sqlite_path: "ad-nope.db".to_string(),
+        sqlite_retention_hours: 168,
     };
 
     use ad_nope::logger::{QueryLogAction, QueryLogEntry, QueryLogger};
