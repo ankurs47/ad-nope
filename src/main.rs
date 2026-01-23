@@ -7,13 +7,13 @@ use tokio::signal;
 use tracing::info;
 
 // mod api; // Removed per user request
-use hickory_server::ServerFuture;
 use ad_nope::config::Config;
 use ad_nope::engine::{BlocklistManager, StandardManager};
 use ad_nope::logger::QueryLogger;
 use ad_nope::resolver::UpstreamResolver;
 use ad_nope::server::DnsHandler;
 use ad_nope::stats::StatsCollector;
+use hickory_server::ServerFuture;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -77,12 +77,8 @@ async fn main() -> Result<()> {
         loop {
             // tokio::time::sleep(update_interval).await;
             interval.tick().await;
-            match manager_for_loop.refresh().await {
-                // This returns Arc<dyn Matcher>
-                matcher => {
-                    handler_clone.update_blocklist(matcher).await;
-                }
-            }
+            let matcher = manager_for_loop.refresh().await;
+            handler_clone.update_blocklist(matcher).await;
         }
     });
 

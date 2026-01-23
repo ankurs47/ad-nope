@@ -3,7 +3,7 @@ use std::process::Command;
 #[test]
 fn test_clippy_no_warnings() {
     let status = Command::new("cargo")
-        .args(&["clippy", "--all-targets", "--", "-D", "warnings"])
+        .args(["clippy", "--all-targets", "--", "-D", "warnings"])
         .status()
         .expect("Failed to run cargo clippy");
 
@@ -13,7 +13,7 @@ fn test_clippy_no_warnings() {
 #[test]
 fn test_fmt_check() {
     let status = Command::new("cargo")
-        .args(&["fmt", "--", "--check"])
+        .args(["fmt", "--", "--check"])
         .status()
         .expect("Failed to run cargo fmt");
 

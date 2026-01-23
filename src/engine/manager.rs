@@ -16,10 +16,7 @@ impl StandardManager {
     pub fn new(config: Config) -> Self {
         Self {
             config,
-            client: Client::builder()
-                .user_agent("AdNope/1.0")
-                .build()
-                .unwrap(),
+            client: Client::builder().user_agent("AdNope/1.0").build().unwrap(),
         }
     }
 
@@ -115,7 +112,7 @@ mod tests {
         127.0.0.1  example.com
         0.0.0.0    adserver.net
         # Empty line
-        
+
         justadomain.com
         ";
 
