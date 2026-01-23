@@ -11,9 +11,9 @@ upstream_servers = [
   "https://dns10.quad9.net/dns-query",
 ]
 
-# Upstream Strategy
-# If true, queries all servers in parallel and returns the fastest response.
-parallel_queries = true
+# Upstream Resolution Policy
+# resolution_policy = "parallel" | "sequential" | "round-robin"
+resolution_policy = "parallel"
 upstream_timeout_ms = 10000
 
 # Bootstrap DNS

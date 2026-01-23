@@ -14,8 +14,8 @@ pub struct Config {
     #[serde(default)]
     pub upstream_servers: Vec<String>,
 
-    #[serde(default = "default_parallel_queries")]
-    pub parallel_queries: bool,
+    #[serde(default = "default_resolution_policy")]
+    pub resolution_policy: String,
 
     #[serde(default = "default_upstream_timeout_ms")]
     pub upstream_timeout_ms: u64,
@@ -95,8 +95,8 @@ fn default_host() -> String {
 fn default_port() -> u16 {
     53
 }
-fn default_parallel_queries() -> bool {
-    false
+fn default_resolution_policy() -> String {
+    "parallel".to_string()
 }
 fn default_upstream_timeout_ms() -> u64 {
     10000
@@ -144,7 +144,7 @@ impl Default for Config {
             host: default_host(),
             port: default_port(),
             upstream_servers: vec![],
-            parallel_queries: default_parallel_queries(),
+            resolution_policy: default_resolution_policy(),
             upstream_timeout_ms: default_upstream_timeout_ms(),
             bootstrap_dns: vec![],
             blocklists: HashMap::new(),

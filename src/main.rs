@@ -10,7 +10,7 @@ use tracing::info;
 use ad_nope::config::Config;
 use ad_nope::engine::{BlocklistManager, StandardManager};
 use ad_nope::logger::QueryLogger;
-use ad_nope::resolver::UpstreamResolver;
+// use ad_nope::resolver::UpstreamResolver;
 use ad_nope::server::DnsHandler;
 use ad_nope::stats::StatsCollector;
 use hickory_server::ServerFuture;
@@ -80,7 +80,8 @@ async fn main() -> Result<()> {
     // For this MVP step, let's just use the static initial matcher.
 
     // 5. Init Upstream Resolver
-    let upstream_resolver = Arc::new(UpstreamResolver::new(config.clone(), stats.clone()).await?);
+    let upstream_resolver =
+        ad_nope::resolver::create_resolver(config.clone(), stats.clone()).await?;
 
     // 6. Build Handler
     let handler = DnsHandler::new(
