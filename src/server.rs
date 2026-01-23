@@ -70,14 +70,10 @@ impl RequestHandler for DnsHandler {
         header.set_authoritative(false); // We are a proxy/recursive resolver mostly
 
         // Fail fast for no queries
-        // request.query() returns &LowerQuery which is a wrapper around a single query.
-        // It doesn't support is_empty(). Assuming valid query if we got this far or API guarantees it.
-
-        // request.query() returns &LowerQuery. LowerQuery wrapper.
-
-        let query = request.query();
+        // request.query() was removed. Access via queries().
+        let query = request.queries().first().expect("No query in request");
         let name = query.name();
-        let name_str = name.to_string().trim_end_matches('.').to_string(); // Normalize
+        let name_str = name.to_string().trim_end_matches('.').to_lowercase(); // Normalize & Lowercase
         let qtype = query.query_type();
 
         // response.add_query(query.clone()); // LowerQuery -> Query?

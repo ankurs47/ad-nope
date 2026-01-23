@@ -1,8 +1,11 @@
 use crate::config::Config;
 use crate::stats::StatsCollector;
 use anyhow::{Context, Result};
-use hickory_resolver::config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts};
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::config::{NameServerConfig, ResolverConfig, ResolverOpts};
+use hickory_resolver::lookup_ip::LookupIp;
+use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::proto::xfer::Protocol;
+use hickory_resolver::{Resolver, TokioResolver};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::time::Instant;
@@ -20,7 +23,7 @@ pub trait DnsResolver: Send + Sync {
 }
 
 pub struct UpstreamResolver {
-    resolver: TokioAsyncResolver,
+    resolver: TokioResolver,
     stats: Arc<StatsCollector>,
 }
 
@@ -59,13 +62,18 @@ impl UpstreamResolver {
                         }
                         cfg
                     };
-                    let bootstrap =
-                        TokioAsyncResolver::tokio(bootstrap_config, ResolverOpts::default());
+                    let mut builder = Resolver::builder_with_config(
+                        bootstrap_config,
+                        TokioConnectionProvider::default(),
+                    );
+                    *builder.options_mut() = ResolverOpts::default();
+                    let bootstrap = builder.build();
                     info!("Bootstrapping upstream host: {}", host_str);
                     match bootstrap.lookup_ip(host_str).await {
                         Ok(lookup) => {
+                            let lookup: LookupIp = lookup;
                             let ip: std::net::IpAddr = lookup
-                                .iter()
+                                .into_iter()
                                 .next()
                                 .context("No IP found for bootstrap host")?;
                             SocketAddr::new(ip, port)
@@ -104,7 +112,10 @@ impl UpstreamResolver {
         let mut opts = ResolverOpts::default();
         opts.cache_size = 0; // We define our own cache layer
 
-        let resolver = TokioAsyncResolver::tokio(resolver_config, opts);
+        let mut builder =
+            Resolver::builder_with_config(resolver_config, TokioConnectionProvider::default());
+        *builder.options_mut() = opts;
+        let resolver = builder.build();
         Ok(Self { resolver, stats })
     }
 
