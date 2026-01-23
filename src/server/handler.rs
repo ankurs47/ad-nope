@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::engine::BlocklistMatcher;
-use crate::logger::{LogAction, LogEntry, QueryLogger};
+use crate::logger::{QueryLogAction, QueryLogEntry, QueryLogger};
 use crate::resolver::DnsResolver;
 use crate::stats::StatsCollector;
 use hickory_server::authority::MessageResponseBuilder;
@@ -73,15 +73,25 @@ impl DnsHandler {
         lock.check(name)
     }
 
-    async fn check_cache(&self, name: &str, qtype: RecordType) -> Option<(Vec<Record>, bool)> {
+    async fn check_cache(
+        &self,
+        name: &str,
+        qtype: RecordType,
+    ) -> Option<(Vec<Record>, bool, Option<u64>)> {
         if let Some((records, valid_until, stale_until)) =
             self.cache.get(&(name.to_string(), qtype)).await
         {
             let now = Instant::now();
+            let ttl = if valid_until > now {
+                Some(valid_until.duration_since(now).as_secs())
+            } else {
+                Some(0)
+            };
+
             if now < valid_until {
-                return Some((records, false));
+                return Some((records, false, ttl));
             } else if now < stale_until {
-                return Some((records, true));
+                return Some((records, true, ttl));
             }
         }
         None
@@ -105,7 +115,7 @@ impl DnsHandler {
             .expect("Failed to send response");
 
         self.logger
-            .log(LogEntry {
+            .log(QueryLogEntry {
                 client_ip: request.src().to_string(),
                 domain: query.name,
                 query_type: query.qtype.to_string(),
@@ -113,6 +123,7 @@ impl DnsHandler {
                 source_id: log.source_id,
                 upstream: log.upstream,
                 latency_ms: query.start.elapsed().as_millis() as u64,
+                ttl_remaining: log.ttl_remaining,
             })
             .await;
 
@@ -156,14 +167,15 @@ impl DnsHandler {
                 .expect("Failed to send response");
 
             self.logger
-                .log(LogEntry {
+                .log(QueryLogEntry {
                     client_ip: request.src().to_string(),
                     domain: query.name.clone(),
                     query_type: query.qtype.to_string(),
-                    action: LogAction::Blocked,
+                    action: QueryLogAction::Blocked,
                     source_id: Some(source_id),
                     upstream: None,
                     latency_ms: query.start.elapsed().as_millis() as u64,
+                    ttl_remaining: None,
                 })
                 .await;
             return info;
@@ -175,9 +187,10 @@ impl DnsHandler {
             records,
             query,
             LogContext {
-                action: LogAction::Blocked,
+                action: QueryLogAction::Blocked,
                 source_id: Some(source_id),
                 upstream: None,
+                ttl_remaining: None,
             },
         )
         .await
@@ -218,9 +231,10 @@ impl DnsHandler {
                     records,
                     query.clone(),
                     LogContext {
-                        action: LogAction::Forwarded, // Or a new type
+                        action: QueryLogAction::Local,
                         source_id: None,
                         upstream: Some("local-config".to_string()),
+                        ttl_remaining: None,
                     },
                 )
                 .await)
@@ -252,7 +266,7 @@ impl DnsHandler {
         query: &QueryContext,
     ) -> Result<ResponseInfo, R> {
         // 2. Check Cache
-        if let Some((records, is_stale)) = self.check_cache(&query.name, query.qtype).await {
+        if let Some((records, is_stale, ttl)) = self.check_cache(&query.name, query.qtype).await {
             self.stats.inc_cache_hit();
             if is_stale {
                 // Trigger background refresh
@@ -271,9 +285,10 @@ impl DnsHandler {
                     records,
                     query.clone(),
                     LogContext {
-                        action: LogAction::Cached,
+                        action: QueryLogAction::Cached,
                         source_id: None,
                         upstream: None,
+                        ttl_remaining: ttl,
                     },
                 )
                 .await)
@@ -310,9 +325,10 @@ impl DnsHandler {
                     records,
                     query,
                     LogContext {
-                        action: LogAction::Forwarded,
+                        action: QueryLogAction::Forwarded,
                         source_id: None,
                         upstream: Some(upstream_name),
+                        ttl_remaining: None,
                     },
                 )
                 .await
@@ -326,10 +342,25 @@ impl DnsHandler {
 
                 let builder = MessageResponseBuilder::from_message_request(request);
                 let response = builder.build(header, &[], &[], &[], &[]);
-                response_handle
+                let info = response_handle
                     .send_response(response)
                     .await
-                    .expect("Failed to send response")
+                    .expect("Failed to send response");
+
+                self.logger
+                    .log(QueryLogEntry {
+                        client_ip: request.src().to_string(),
+                        domain: query.name,
+                        query_type: query.qtype.to_string(),
+                        action: QueryLogAction::Forwarded,
+                        source_id: None,
+                        upstream: Some(format!("error: {}", e)),
+                        latency_ms: query.start.elapsed().as_millis() as u64,
+                        ttl_remaining: None,
+                    })
+                    .await;
+
+                info
             }
         }
     }

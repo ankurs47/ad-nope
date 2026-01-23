@@ -23,6 +23,12 @@ bootstrap_dns = ["8.8.8.8:53"]
 # Allowlist
 allowlist = []
 
+# Local Records
+# define custom domain -> IP mappings (A/AAAA records)
+[local_records]
+"my.router" = "192.168.1.1"
+"dev.server" = "127.0.0.1"
+
 # Blocklists
 [blocklists]
 hagezi-pro = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt"
@@ -53,9 +59,14 @@ enable = true
 log_blocked = true
 log_all_queries = true
 format = "text"        # or "json"
-target = "console"     # or "file", "syslog"
+# target is for general application logs (tracing).
+# Deprecated for query logging, but kept for compatibility.
+target = "console"
+# query_log_sinks is specific for DNS query logs
+query_log_sinks = ["console"]    # ["console", "file", "sqlite"]
 level = "info"         # "error", "warn", "info", "debug", "trace"
 # file_path = "ad-nope.log"
+# syslog_addr = "127.0.0.1:514"
 
 # Stats
 [stats]

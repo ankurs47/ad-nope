@@ -23,14 +23,19 @@ async fn main() -> Result<()> {
     } else {
         Config::default()
     };
-
     // 1. Setup Logging (Tracing)
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         let mut filter = config.logging.level.clone();
-        // Reduce noise from hickory_proto (H3/QUIC timeouts) unless explicitly set
-        if !filter.contains("hickory_proto") {
-            filter.push_str(",hickory_proto=error");
+
+        // Suppress hickory_server logs unless explicitly enabled/overridden
+        if !filter.contains("hickory_server") {
+            filter.push_str(",hickory_server=off");
         }
+        // Also suppress hickory_proto if not set
+        if !filter.contains("hickory_proto") {
+            filter.push_str(",hickory_proto=off");
+        }
+
         tracing_subscriber::EnvFilter::new(filter)
     });
 

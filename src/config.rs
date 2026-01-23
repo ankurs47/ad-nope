@@ -69,7 +69,7 @@ pub struct LoggingConfig {
     pub enable: bool,
     #[serde(default = "default_log_blocked")]
     pub log_blocked: bool,
-    #[serde(default)]
+    #[serde(default = "default_log_all_queries")]
     pub log_all_queries: bool,
     #[serde(default = "default_log_format")]
     pub format: String,
@@ -81,6 +81,8 @@ pub struct LoggingConfig {
     pub file_path: Option<String>,
     #[serde(default)]
     pub syslog_addr: Option<String>,
+    #[serde(default = "default_query_log_sinks")]
+    pub query_log_sinks: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -125,6 +127,9 @@ fn default_log_enable() -> bool {
 fn default_log_blocked() -> bool {
     true
 }
+fn default_log_all_queries() -> bool {
+    true
+}
 fn default_log_format() -> String {
     "text".to_string()
 }
@@ -133,6 +138,9 @@ fn default_log_target() -> String {
 }
 fn default_log_level() -> String {
     "info".to_string()
+}
+fn default_query_log_sinks() -> Vec<String> {
+    vec!["console".to_string()]
 }
 fn default_stats_enable() -> bool {
     true
@@ -200,12 +208,13 @@ impl Default for LoggingConfig {
         Self {
             enable: default_log_enable(),
             log_blocked: default_log_blocked(),
-            log_all_queries: false,
+            log_all_queries: default_log_all_queries(),
             format: default_log_format(),
             target: default_log_target(),
             level: default_log_level(),
             file_path: None,
             syslog_addr: None,
+            query_log_sinks: default_query_log_sinks(),
         }
     }
 }

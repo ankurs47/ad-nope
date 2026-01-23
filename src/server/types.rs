@@ -1,4 +1,4 @@
-use crate::logger::LogAction;
+use crate::logger::QueryLogAction;
 use hickory_server::proto::rr::RecordType;
 use std::time::Instant;
 
@@ -10,7 +10,8 @@ pub struct QueryContext {
 }
 
 pub struct LogContext {
-    pub action: LogAction,
+    pub action: QueryLogAction,
     pub source_id: Option<u8>,
     pub upstream: Option<String>,
+    pub ttl_remaining: Option<u64>,
 }
