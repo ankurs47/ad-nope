@@ -24,18 +24,19 @@ impl StandardManager {
         let mut entries = Vec::new();
         for line in text.lines() {
             let line = line.trim();
+            // Skip comments and empty lines
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
 
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.is_empty() {
-                continue;
+            // In hosts format: 0.0.0.0 domain.com
+            // In domain list format: domain.com
+            // Taking the last whitespace-separated part works for both.
+            if let Some(domain) = line.split_whitespace().next_back() {
+                if domain != "localhost" && domain != "0.0.0.0" && domain != "127.0.0.1" {
+                    entries.push((domain.to_string(), source_id));
+                }
             }
-
-            let domain = if parts.len() >= 2 { parts[1] } else { parts[0] };
-
-            entries.push((domain.to_string(), source_id));
         }
         entries
     }
