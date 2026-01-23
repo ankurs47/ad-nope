@@ -29,7 +29,7 @@ hickory-resolver = { version = "0.25.2", features = [
 
 # Serialization & Config
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "0.9"
 
 # HTTP Client
 reqwest = { version = "0.13.1", default-features = false, features = [
