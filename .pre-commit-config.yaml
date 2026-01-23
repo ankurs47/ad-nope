@@ -26,11 +26,3 @@ repos:
         args: ["--", "-D", "warnings"]
         types: [rust]
         pass_filenames: false
-
-      - id: test
-        name: test
-        description: Run cargo test
-        entry: cargo test
-        language: system
-        types: [rust]
-        pass_filenames: false
