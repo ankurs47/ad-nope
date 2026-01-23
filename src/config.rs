@@ -96,7 +96,7 @@ fn default_host() -> String {
     "0.0.0.0".to_string()
 }
 fn default_port() -> u16 {
-    53
+    5300
 }
 fn default_resolution_policy() -> String {
     "parallel".to_string()
