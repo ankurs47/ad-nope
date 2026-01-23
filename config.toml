@@ -8,6 +8,8 @@ upstream_servers = [
   "h3://dns.google/dns-query",
   "h3://cloudflare-dns.com/dns-query",
   "h3://unfiltered.adguard-dns.com/dns-query",
+  "quic://unfiltered.adguard-dns.com",
+  "quic://dns.controld.com/unfiltered",
   "udp://1.1.1.1:53",
 ]
 
