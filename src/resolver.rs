@@ -90,14 +90,15 @@ impl UpstreamResolver {
                     "tcp" => Protocol::Tcp,
                     "tls" => Protocol::Tls,
                     "https" => Protocol::Https,
-                    // "quic" => Protocol::Quic, // Not supported in this version of hickory-resolver?
+                    "quic" => Protocol::Quic,
+                    "h3" => Protocol::Https,
                     _ => Protocol::Udp,
                 };
 
                 let mut ns_cfg = NameServerConfig::new(socket_addr, protocol);
 
-                // For TLS/HTTPS, we need the tls_dns_name (SNI)
-                if matches!(protocol, Protocol::Tls | Protocol::Https) {
+                // For TLS/HTTPS/QUIC, we need the tls_dns_name (SNI)
+                if matches!(protocol, Protocol::Tls | Protocol::Https | Protocol::Quic) {
                     ns_cfg.tls_dns_name = Some(host_str.to_string());
                 }
 
