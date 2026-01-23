@@ -2,6 +2,13 @@
 
 [![Docker Build and Publish](https://github.com/ankurs47/ad-nope/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/ankurs47/ad-nope/actions/workflows/docker-publish.yml)
 
+> [!IMPORTANT]
+> **✨ 100% AI-Generated Code ✨**
+>
+> This project was built entirely from scratch using **Google's Antigravity** in just 2 days. I didn't write a single line of code—I just provided the "executive vision" (read: told the AI what to do).
+>
+> Inspired by [blocky](https://github.com/0xERR0R/blocky) and built for fun. If it breaks, blame the robot! 🤖
+
 ad-nope is a high-performance, privacy-focused DNS resolver and ad-blocker written in Rust. It leverages the power of [Hickory DNS](https://github.com/hickory-dns/hickory-dns) to support modern, secure DNS protocols for upstream resolution.
 
 ## 🚀 Features
