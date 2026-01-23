@@ -6,23 +6,25 @@ ad-nope is a high-performance, privacy-focused DNS resolver and ad-blocker writt
 
 ## 🚀 Features
 
-*   **Modern Protocols**: Supports DNS-over-HTTPS (DoH), DNS-over-TLS (DoT), DNS-over-QUIC (DoQ), and DNS-over-HTTP/3 (DoH3) for upstream connections.
-*   **Ad & Tracker Blocking**: Downloads and enforces standard blocklists (e.g., Hagezi's lists).
-*   **High Performance**: Built on asynchronous Rust (Tokio) with parallel upstream queries and efficient caching (Moka).
-*   **Connection Multiplexing**: Reuses connections to upstream resolvers (H3/QUIC/HTTPS) to minimize latency.
-*   **Observability**: Detailed statistics and structured logging (text or JSON) for blocked queries, cache hits, and upstream latency.
-*   **Multi-Arch Docker**: Runs on x86_64 servers and ARM64 devices (like Raspberry Pi).
+* **Modern Protocols**: Supports DNS-over-HTTPS (DoH), DNS-over-TLS (DoT), DNS-over-QUIC (DoQ), and DNS-over-HTTP/3 (DoH3) for upstream connections.
+* **Ad & Tracker Blocking**: Downloads and enforces standard blocklists (e.g., Hagezi's lists).
+* **High Performance**: Built on asynchronous Rust (Tokio) with parallel upstream queries and efficient caching (Moka).
+* **Connection Multiplexing**: Reuses connections to upstream resolvers (H3/QUIC/HTTPS) to minimize latency.
+* **Observability**: Detailed statistics and structured logging (text or JSON) for blocked queries, cache hits, and upstream latency.
+* **Multi-Arch Docker**: Runs on x86_64 servers and ARM64 devices (like Raspberry Pi).
 
 ## 🐳 Docker Quick Start
 
 The easiest way to run ad-nope is using the official Docker image.
 
 ### 1. Pull the Image
+
 ```bash
 docker pull ankurs47/ad-nope:latest
 ```
 
 ### 2. Run the Container
+
 ad-nope listens on port `5300` inside the container by default (to avoid needing root privileges). You should map this to port `53` on your host.
 
 ```bash
@@ -35,7 +37,9 @@ docker run -d \
 ```
 
 ### 3. Verify
+
 You can test the server using `dig`:
+
 ```bash
 dig @localhost -p 53 google.com
 ```
@@ -45,9 +49,11 @@ dig @localhost -p 53 google.com
 ad-nope is configured via a `config.toml` file. You can mount your own configuration into the Docker container to customize behavior.
 
 ### Default Configuration
+
 See [config.toml](config.toml) for the complete default configuration.
 
 ### Mounting Custom Config
+
 ```bash
 docker run -d \
   --name ad-nope \
@@ -61,6 +67,7 @@ docker run -d \
 
 **Upstream Servers**
 Supports `udp`, `tcp`, `tls`, `https` (DoH), `quic` (DoQ), and `h3` (DoH3).
+
 ```toml
 upstream_servers = [
   "h3://dns.google/dns-query",
@@ -71,6 +78,7 @@ upstream_servers = [
 
 **Blocklists**
 Map friendly names to blocklist URLs (text format, one domain per line).
+
 ```toml
 [blocklists]
 hagezi-pro = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt"
@@ -78,6 +86,7 @@ hagezi-gambling = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wild
 ```
 
 **Caching & Performance**
+
 ```toml
 parallel_queries = true        # Race all upstreams, return fastest
 upstream_timeout_ms = 5000     # Timeout in milliseconds
@@ -87,10 +96,12 @@ upstream_connection_pool_size = 2 # Connections per upstream
 ## 🛠️ Building from Source
 
 ### Prerequisites
-*   Rust (latest stable)
-*   Build tools (CMake, C++ compiler) for cryptographic dependencies.
+
+* Rust (latest stable)
+* Build tools (CMake, C++ compiler) for cryptographic dependencies.
 
 ### Build & Run
+
 ```bash
 # Clone the repository
 git clone https://github.com/ankurs47/ad-nope.git
@@ -106,6 +117,7 @@ cargo build --release
 ## 📊 Monitoring
 
 ad-nope outputs stats to the console (or configured log target) periodically:
+
 ```text
 STATS DUMP: Total: 1542, Blocked: 231 (15.0%), CacheHits: 412 (26.7%), Upstreams: [dns.google: 25.4ms] [cloudflare: 18.2ms] BlockStats: [hagezi-pro: 200 (86.6%)] [hagezi-gambling: 31 (13.4%)]
 ```
