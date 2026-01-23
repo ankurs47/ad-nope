@@ -17,23 +17,26 @@ use hickory_server::ServerFuture;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. Setup Logging (Tracing)
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-    info!("Starting AdNope...");
-
-    // 2. Load Config
+    // 2. Load Config (Before logging init to get level)
     let config_path = std::env::args().nth(1).unwrap_or("config.toml".to_string());
     let config = if std::path::Path::new(&config_path).exists() {
         Config::load(&config_path).await?
     } else {
-        info!("Config file not found, using defaults.");
         Config::default()
     };
+
+    // 1. Setup Logging (Tracing)
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.logging.level)),
+        )
+        .init();
+    info!("Starting AdNope...");
+
+    if !std::path::Path::new(&config_path).exists() {
+        info!("Config file not found, using defaults.");
+    }
 
     // 3. Init Stats & Logger
     let stats = StatsCollector::new(config.stats.log_interval_seconds);

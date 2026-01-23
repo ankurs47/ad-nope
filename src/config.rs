@@ -68,6 +68,8 @@ pub struct LoggingConfig {
     pub format: String,
     #[serde(default = "default_log_target")]
     pub target: String,
+    #[serde(default = "default_log_level")]
+    pub level: String,
     #[serde(default)]
     pub file_path: Option<String>,
     #[serde(default)]
@@ -118,6 +120,9 @@ fn default_log_format() -> String {
 }
 fn default_log_target() -> String {
     "console".to_string()
+}
+fn default_log_level() -> String {
+    "info".to_string()
 }
 fn default_stats_enable() -> bool {
     true
@@ -171,6 +176,7 @@ impl Default for LoggingConfig {
             log_all_queries: false,
             format: default_log_format(),
             target: default_log_target(),
+            level: default_log_level(),
             file_path: None,
             syslog_addr: None,
         }

@@ -46,6 +46,7 @@ log_blocked = true
 log_all_queries = true
 format = "text"        # or "json"
 target = "console"     # or "file", "syslog"
+level = "info"         # "error", "warn", "info", "debug", "trace"
 # file_path = "ad-nope.log"
 
 # Stats
