@@ -1,8 +1,8 @@
-# Adnope
+# ad-nope
 
 [![Docker Build and Publish](https://github.com/ankurs47/ad-nope/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/ankurs47/ad-nope/actions/workflows/docker-publish.yml)
 
-Adnope is a high-performance, privacy-focused DNS resolver and ad-blocker written in Rust. It leverages the power of [Hickory DNS](https://github.com/hickory-dns/hickory-dns) to support modern, secure DNS protocols for upstream resolution.
+ad-nope is a high-performance, privacy-focused DNS resolver and ad-blocker written in Rust. It leverages the power of [Hickory DNS](https://github.com/hickory-dns/hickory-dns) to support modern, secure DNS protocols for upstream resolution.
 
 ## 🚀 Features
 
@@ -15,7 +15,7 @@ Adnope is a high-performance, privacy-focused DNS resolver and ad-blocker writte
 
 ## 🐳 Docker Quick Start
 
-The easiest way to run Adnope is using the official Docker image.
+The easiest way to run ad-nope is using the official Docker image.
 
 ### 1. Pull the Image
 ```bash
@@ -23,7 +23,7 @@ docker pull ankurs47/ad-nope:latest
 ```
 
 ### 2. Run the Container
-AdNope listens on port `5300` inside the container by default (to avoid needing root privileges). You should map this to port `53` on your host.
+ad-nope listens on port `5300` inside the container by default (to avoid needing root privileges). You should map this to port `53` on your host.
 
 ```bash
 docker run -d \
@@ -42,7 +42,7 @@ dig @localhost -p 53 google.com
 
 ## ⚙️ Configuration
 
-AdNope is configured via a `config.toml` file. You can mount your own configuration into the Docker container to customize behavior.
+ad-nope is configured via a `config.toml` file. You can mount your own configuration into the Docker container to customize behavior.
 
 ### Default Configuration
 See [config.toml](config.toml) for the complete default configuration.
@@ -105,7 +105,7 @@ cargo build --release
 
 ## 📊 Monitoring
 
-AdNope outputs stats to the console (or configured log target) periodically:
+ad-nope outputs stats to the console (or configured log target) periodically:
 ```text
 STATS DUMP: Total: 1542, Blocked: 231 (15.0%), CacheHits: 412 (26.7%), Upstreams: [dns.google: 25.4ms] [cloudflare: 18.2ms] BlockStats: [hagezi-pro: 200 (86.6%)] [hagezi-gambling: 31 (13.4%)]
 ```
