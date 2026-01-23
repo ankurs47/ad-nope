@@ -5,9 +5,10 @@ port = 5300      # Using 5300 for dev (requires sudo for 53)
 # Upstream DNS Servers
 # format: <protocol>://<ip_or_host>:<port>
 upstream_servers = [
+  "h3://dns.google/dns-query",
+  "h3://cloudflare-dns.com/dns-query",
+  "h3://unfiltered.adguard-dns.com/dns-query",
   "udp://1.1.1.1:53",
-  "tls://dns.google:853",
-  "https://cloudflare-dns.com/dns-query",
 ]
 
 # Upstream Strategy
