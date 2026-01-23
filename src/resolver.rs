@@ -91,14 +91,17 @@ impl UpstreamResolver {
                     "tls" => Protocol::Tls,
                     "https" => Protocol::Https,
                     "quic" => Protocol::Quic,
-                    "h3" => Protocol::Https,
+                    "h3" => Protocol::H3,
                     _ => Protocol::Udp,
                 };
 
                 let mut ns_cfg = NameServerConfig::new(socket_addr, protocol);
 
-                // For TLS/HTTPS/QUIC, we need the tls_dns_name (SNI)
-                if matches!(protocol, Protocol::Tls | Protocol::Https | Protocol::Quic) {
+                // For TLS/HTTPS/QUIC/H3, we need the tls_dns_name (SNI)
+                if matches!(
+                    protocol,
+                    Protocol::Tls | Protocol::Https | Protocol::Quic | Protocol::H3
+                ) {
                     ns_cfg.tls_dns_name = Some(host_str.to_string());
                 }
 
