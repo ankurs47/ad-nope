@@ -1,0 +1,25 @@
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    libgcc \
+    libstdc++ \
+    ca-certificates \
+    tzdata
+
+WORKDIR /app
+
+# The build process must supply these arguments
+ARG TARGETOS
+ARG TARGETARCH
+
+# Copy the specific binary for the target architecture
+# The workflow must verify these files exist at these paths
+COPY artifacts/${TARGETOS}/${TARGETARCH}/ad-nope .
+
+RUN chmod +x ./ad-nope
+
+EXPOSE 5300/udp
+EXPOSE 5300/tcp
+
+ENTRYPOINT ["./ad-nope"]

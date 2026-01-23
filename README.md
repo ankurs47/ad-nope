@@ -137,6 +137,20 @@ cargo run -- example_config.toml
 cargo build --release
 ```
 
+### Cross-Compilation (ARM / Raspberry Pi)
+
+The easiest way to cross-compile locally is using [cross](https://github.com/cross-rs/cross).
+
+1. Install `cross`:
+   ```bash
+   cargo install cross
+   ```
+2. Build for ARM64 (e.g., Raspberry Pi 4/5, Docker ARM64):
+   ```bash
+   cross build --target aarch64-unknown-linux-gnu --release
+   ```
+3. The binary will be in `target/aarch64-unknown-linux-gnu/release/ad-nope`.
+
 ## 📊 Monitoring
 
 ad-nope outputs stats to the console (or configured log target) periodically:
