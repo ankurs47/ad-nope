@@ -75,12 +75,11 @@ async fn main() -> Result<()> {
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(update_interval);
-        // First tick is immediate, but we just did it. Skip one?
-        // interval.tick().await;
-        // Actually, interval.tick() completes immediately if missed?
-        // Let's just create loop.
+        // The first tick completes immediately. Since we just refreshed in main(),
+        // we consume the first tick so the loop waits for the full duration before the next refresh.
+        interval.tick().await;
+
         loop {
-            // tokio::time::sleep(update_interval).await;
             interval.tick().await;
             let matcher = manager_for_loop.refresh().await;
             handler_clone.update_blocklist(matcher).await;
