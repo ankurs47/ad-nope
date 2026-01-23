@@ -21,8 +21,7 @@ bootstrap_dns = ["8.8.8.8:53", "1.0.0.1:53"]
 
 # Blocklists
 blocklists = [
-  "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
-  "https://adaway.org/hosts.txt",
+  "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/light.txt",
 ]
 
 # Allowlist

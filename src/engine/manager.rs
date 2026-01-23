@@ -29,14 +29,8 @@ impl StandardManager {
                 continue;
             }
 
-            // In hosts format: 0.0.0.0 domain.com
-            // In domain list format: domain.com
-            // Taking the last whitespace-separated part works for both.
-            if let Some(domain) = line.split_whitespace().next_back() {
-                if domain != "localhost" && domain != "0.0.0.0" && domain != "127.0.0.1" {
-                    entries.push((domain.to_string(), source_id));
-                }
-            }
+            // Simple domain list format: one domain per line
+            entries.push((line.to_string(), source_id));
         }
         entries
     }
@@ -107,11 +101,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_blocklist_hosts_format() {
+    fn test_parse_blocklist_simple_format() {
         let content = "
         # Check comments
-        127.0.0.1  example.com
-        0.0.0.0    adserver.net
+        example.com
+        adserver.net
         # Empty line
 
         justadomain.com
