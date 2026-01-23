@@ -1,0 +1,48 @@
+[package]
+name = "ad-nope"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# DNS Libraries
+hickory-server = { version = "0.24", features = [
+  "dns-over-rustls",
+  "dns-over-https-rustls",
+  "resolver",
+] }
+hickory-resolver = { version = "0.24", features = [
+  "dns-over-rustls",
+  "dns-over-https-rustls",
+] }
+
+# Serialization & Config
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# HTTP Client
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "stream",
+] }
+
+# Caching
+moka = { version = "0.12", features = ["future"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Error Handling
+thiserror = "2"
+anyhow = "1"
+
+# Utilities
+url = "2"
+bytes = "1"
+tokio-util = { version = "0.7", features = ["time"] }

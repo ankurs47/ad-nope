@@ -1,0 +1,53 @@
+# Network Configuration
+host = "0.0.0.0"
+port = 5300      # Using 5300 for dev (requires sudo for 53)
+
+# Upstream DNS Servers
+# format: <protocol>://<ip_or_host>:<port>
+upstream_servers = [
+  "udp://1.1.1.1:53",
+  "tls://dns.google:853",
+  "https://cloudflare-dns.com/dns-query",
+]
+
+# Upstream Strategy
+# If true, queries all servers in parallel and returns the fastest response.
+parallel_queries = true
+
+# Bootstrap DNS
+# Used to resolve domain names in `upstream_servers`
+bootstrap_dns = ["8.8.8.8:53", "1.0.0.1:53"]
+
+# Blocklists
+blocklists = [
+  "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+  "https://adaway.org/hosts.txt",
+]
+
+# Allowlist
+allowlist = ["analytics.google.com"]
+
+# Caching
+[cache]
+enable = true
+capacity = 10000
+grace_period_sec = 10
+
+# Updates
+[updates]
+interval_hours = 24
+concurrent_downloads = 4
+
+# Logging
+[logging]
+enable = true
+log_blocked = true
+log_all_queries = true
+format = "text"        # or "json"
+target = "console"     # or "file", "syslog"
+# file_path = "ad-nope.log"
+
+# Stats
+[stats]
+enable = true
+log_interval_seconds = 300
