@@ -3,6 +3,7 @@ use crate::engine::BlocklistMatcher;
 use crate::logger::{QueryLogAction, QueryLogEntry, QueryLogger};
 use crate::resolver::DnsResolver;
 use crate::stats::StatsCollector;
+use anyhow::Result;
 use hickory_server::authority::MessageResponseBuilder;
 use hickory_server::proto::op::ResponseCode;
 use hickory_server::proto::rr::{
@@ -48,6 +49,26 @@ impl DnsHandler {
             resolver,
             cache,
         }
+    }
+
+    async fn resolve_and_cache(
+        &self,
+        name: &str,
+        qtype: RecordType,
+    ) -> Result<(Vec<Record>, String)> {
+        let (records, upstream) = self.resolver.resolve(name, qtype).await?;
+        if !records.is_empty() {
+            let min_ttl = records.iter().map(|r| r.ttl()).min().unwrap_or(300);
+            let valid_until = Instant::now() + Duration::from_secs(min_ttl as u64);
+            let stale_until = valid_until + Duration::from_secs(self.config.cache.grace_period_sec);
+            self.cache
+                .insert(
+                    (name.to_string(), qtype),
+                    (records.clone(), valid_until, stale_until),
+                )
+                .await;
+        }
+        Ok((records, upstream))
     }
 
     pub async fn update_blocklist(&self, new_blocklist: Arc<dyn BlocklistMatcher>) {
@@ -270,11 +291,14 @@ impl DnsHandler {
             self.stats.inc_cache_hit();
             if is_stale {
                 // Trigger background refresh
-                let _resolver = self.resolver.clone();
-                let _cache = self.cache.clone();
-                let _q_name = query.name.clone();
+                let handler = self.clone();
+                let q_name = query.name.clone();
+                let q_type = query.qtype;
+
                 tokio::spawn(async move {
-                    // Re-resolve (Placeholder)
+                    if let Err(e) = handler.resolve_and_cache(&q_name, q_type).await {
+                        error!("Background re-resolve failed for {}: {}", q_name, e);
+                    }
                 });
             }
 
@@ -304,21 +328,8 @@ impl DnsHandler {
         query: QueryContext,
     ) -> ResponseInfo {
         // 3. Resolve Upstream
-        match self.resolver.resolve(&query.name, query.qtype).await {
+        match self.resolve_and_cache(&query.name, query.qtype).await {
             Ok((records, upstream_name)) => {
-                if !records.is_empty() {
-                    let min_ttl = records.iter().map(|r| r.ttl()).min().unwrap_or(60);
-                    let valid_until = Instant::now() + Duration::from_secs(min_ttl as u64);
-                    let stale_until =
-                        valid_until + Duration::from_secs(self.config.cache.grace_period_sec);
-                    self.cache
-                        .insert(
-                            (query.name.clone(), query.qtype),
-                            (records.clone(), valid_until, stale_until),
-                        )
-                        .await;
-                }
-
                 self.serve_records(
                     request,
                     response_handle,
