@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 # Async Runtime
-tokio = { version = "1", features = ["full"] }
-futures = "0.3"
-async-trait = "0.1"
+tokio = { version = "1.49.0", features = ["full"] }
+futures = "0.3.31"
+async-trait = "0.1.89"
 
 # DNS Libraries
 hickory-server = { version = "0.25.2" }
@@ -22,9 +22,13 @@ hickory-resolver = { version = "0.25.2", features = [
 
 # Serialization & Config
 # Serialization & Config
-serde = { version = "1", features = ["derive"] }
-toml = "0.9"
-rusqlite = { version = "0.38", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+toml = "0.9.11" # Assuming 0.9.11 compatible with 0.9.11+spec-1.1.0
+rusqlite = { version = "0.38.0", features = ["bundled"] }
+axum = { version = "0.8.8", features = ["macros"] }
+rust-embed = { version = "8.11.0", features = ["interpolate-folder-path"] }
+mime_guess = "2.0.5"
 
 # HTTP Client
 reqwest = { version = "0.13.1", default-features = false, features = [
@@ -33,22 +37,24 @@ reqwest = { version = "0.13.1", default-features = false, features = [
 ] }
 
 # Caching
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12.13", features = ["future"] }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tracing-appender = "0.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
+tracing-appender = "0.2.4"
 
 # Error Handling
-thiserror = "2"
-anyhow = "1"
+thiserror = "2.0.18"
+anyhow = "1.0.100"
 
 # Utilities
-url = "2"
-bytes = "1"
-tokio-util = { version = "0.7", features = ["time", "io"] }
+url = "2.5.8"
+bytes = "1.11.1"
+tokio-util = { version = "0.7.18", features = ["time", "io"] }
 arc-swap = "1.8.1"
 rustc-hash = "2.1.1"
-smol_str = "0.2"
-smallvec = "1.13"
+smol_str = "0.3.5"
+
+[build-dependencies]
+minify-html = "0.18.1"

@@ -24,8 +24,8 @@ async fn test_sqlite_sink_logging() {
         sqlite_retention_hours: 24,
     };
 
-    let blocklist_names = vec!["test_list".to_string()];
-    let logger = QueryLogger::new(config, blocklist_names);
+    let _blocklist_names = vec!["test_list".to_string()];
+    let logger = QueryLogger::new(config, vec![], vec![]);
 
     // Send a log entry (IpAddr type enforces no port)
     let entry = QueryLogEntry {

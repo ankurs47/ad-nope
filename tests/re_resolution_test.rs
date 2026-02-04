@@ -1,5 +1,5 @@
 use ad_nope::config::Config;
-use ad_nope::engine::BlocklistMatcher;
+use ad_nope::engine::{AppState, BlocklistMatcher};
 use ad_nope::logger::QueryLogger;
 use ad_nope::resolver::DnsResolver;
 use ad_nope::server::DnsHandler;
@@ -48,14 +48,22 @@ async fn test_background_re_resolution() {
     config.cache.min_ttl = 0; // Allow short TTL for testing
 
     let stats = StatsCollector::new(10, vec![], vec![]);
-    let logger = QueryLogger::new(config.logging.clone(), vec![]);
+    let logger = QueryLogger::new(config.logging.clone(), vec![], vec![]);
     let call_count = Arc::new(AtomicUsize::new(0));
     let resolver = Arc::new(MockResolver {
         call_count: call_count.clone(),
     });
     let blocklist = Arc::new(MockBlocklist);
+    let app_state = AppState::new();
 
-    let handler = DnsHandler::new(config.clone(), stats, logger, blocklist, resolver);
+    let handler = DnsHandler::new(
+        config.clone(),
+        stats,
+        logger,
+        blocklist,
+        resolver,
+        app_state,
+    );
 
     // Start Server
     let mut server = ServerFuture::new(handler);

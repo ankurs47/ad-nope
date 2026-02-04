@@ -1,7 +1,14 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::time::{self, Duration};
 use tracing::info;
+
+#[derive(Debug, serde::Serialize, Clone)]
+pub struct TopItem {
+    pub name: String,
+    pub count: u64,
+}
 
 #[derive(Debug)]
 pub struct StatsCollector {
@@ -10,17 +17,16 @@ pub struct StatsCollector {
     blocked_queries: AtomicU64,
     cache_hits: AtomicU64,
 
-    // Granular Stats
+    // Granular Stats (Protected by RwLock)
+    client_queries: RwLock<HashMap<String, u64>>,
+    client_blocks: RwLock<HashMap<String, u64>>,
+    domain_queries: RwLock<HashMap<String, u64>>,
+    domain_blocks: RwLock<HashMap<String, u64>>,
+
     // Max 256 sources (u8 key).
-    // Just using a fixed-size array for O(1) mostly-lock-free access slightly better than a Map
-    // wrapped in RwLock for high contention updates?
-    // Actually, for just 256 items, a fixed array of AtomicU64 is perfect and purely lock-free.
     blocks_by_source: [AtomicU64; 256],
 
     // Upstream Latency Tracking
-    // We'll support up to 16 upstreams for stats purposes.
-    // Storing (TotalTimeMs, Count) requires a struct, but we want lock-free.
-    // We'll just separate TotalTime and Count arrays.
     upstream_total_ms: [AtomicU64; 16],
     upstream_count: [AtomicU64; 16],
     upstream_names: Vec<String>,
@@ -39,6 +45,10 @@ impl StatsCollector {
             total_queries: AtomicU64::new(0),
             blocked_queries: AtomicU64::new(0),
             cache_hits: AtomicU64::new(0),
+            client_queries: RwLock::new(HashMap::new()),
+            client_blocks: RwLock::new(HashMap::new()),
+            domain_queries: RwLock::new(HashMap::new()),
+            domain_blocks: RwLock::new(HashMap::new()),
             blocks_by_source: [0; 256].map(|_| AtomicU64::new(0)),
             upstream_total_ms: [0; 16].map(|_| AtomicU64::new(0)),
             upstream_count: [0; 16].map(|_| AtomicU64::new(0)),
@@ -71,6 +81,30 @@ impl StatsCollector {
     pub fn inc_blocked_by_source(&self, source_id: u8) {
         self.inc_blocked();
         self.blocks_by_source[source_id as usize].fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_client_query(&self, client: String) {
+        if let Ok(mut map) = self.client_queries.write() {
+            *map.entry(client).or_insert(0) += 1;
+        }
+    }
+
+    pub fn inc_client_block(&self, client: String) {
+        if let Ok(mut map) = self.client_blocks.write() {
+            *map.entry(client).or_insert(0) += 1;
+        }
+    }
+
+    pub fn inc_domain_query(&self, domain: String) {
+        if let Ok(mut map) = self.domain_queries.write() {
+            *map.entry(domain).or_insert(0) += 1;
+        }
+    }
+
+    pub fn inc_domain_block(&self, domain: String) {
+        if let Ok(mut map) = self.domain_blocks.write() {
+            *map.entry(domain).or_insert(0) += 1;
+        }
     }
 
     pub fn record_upstream_latency(&self, upstream_idx: usize, ms: u64) {
@@ -145,4 +179,43 @@ impl StatsCollector {
             block_stats
         );
     }
+
+    fn get_top_k(&self, map: &RwLock<HashMap<String, u64>>, k: usize) -> Vec<TopItem> {
+        if let Ok(map) = map.read() {
+            let mut items: Vec<_> = map
+                .iter()
+                .map(|(k, v)| TopItem {
+                    name: k.clone(),
+                    count: *v,
+                })
+                .collect();
+            items.sort_by(|a, b| b.count.cmp(&a.count)); // Descending
+            items.into_iter().take(k).collect()
+        } else {
+            vec![]
+        }
+    }
+
+    pub fn get_snapshot(&self) -> StatsSnapshot {
+        StatsSnapshot {
+            total_queries: self.total_queries.load(Ordering::Relaxed),
+            blocked_queries: self.blocked_queries.load(Ordering::Relaxed),
+            cache_hits: self.cache_hits.load(Ordering::Relaxed),
+            top_clients: self.get_top_k(&self.client_queries, 5),
+            top_blocked_clients: self.get_top_k(&self.client_blocks, 5),
+            top_domains: self.get_top_k(&self.domain_queries, 5),
+            top_blocked_domains: self.get_top_k(&self.domain_blocks, 5),
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct StatsSnapshot {
+    pub total_queries: u64,
+    pub blocked_queries: u64,
+    pub cache_hits: u64,
+    pub top_clients: Vec<TopItem>,
+    pub top_blocked_clients: Vec<TopItem>,
+    pub top_domains: Vec<TopItem>,
+    pub top_blocked_domains: Vec<TopItem>,
 }

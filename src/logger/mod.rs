@@ -1,10 +1,12 @@
 pub mod console_sink;
+pub mod memory_sink;
 pub mod sqlite_sink;
 pub mod types;
 
-pub use self::console_sink::ConsoleLogSink;
-pub use self::sqlite_sink::SqliteLogSink;
-pub use self::types::{QueryLogAction, QueryLogEntry, QueryLogSink};
+pub use console_sink::ConsoleLogSink;
+pub use memory_sink::MemoryLogSink;
+pub use sqlite_sink::SqliteLogSink;
+pub use types::{QueryLogAction, QueryLogEntry, QueryLogSink};
 
 use crate::config::LoggingConfig;
 use std::sync::Arc;
@@ -15,9 +17,14 @@ pub struct QueryLogger {
 }
 
 impl QueryLogger {
-    pub fn new(config: LoggingConfig, blocklist_names: Vec<String>) -> Arc<Self> {
+    pub fn new(
+        config: LoggingConfig,
+        blocklist_names: Vec<String>,
+        extra_sinks: Vec<Box<dyn QueryLogSink>>,
+    ) -> Arc<Self> {
         let mut sinks = Vec::new();
 
+        // Process configured sinks
         for sink_type in &config.query_log_sinks {
             if sink_type == "console" {
                 let (tx, mut rx) = mpsc::channel(1000);
@@ -44,6 +51,17 @@ impl QueryLogger {
             } else {
                 eprintln!("Unknown log sink type: {}", sink_type);
             }
+        }
+
+        // Process extra sinks (e.g. MemorySink for UI)
+        for sink in extra_sinks {
+            let (tx, mut rx) = mpsc::channel(1000);
+            tokio::spawn(async move {
+                while let Some(entry) = rx.recv().await {
+                    sink.log(&entry);
+                }
+            });
+            sinks.push(tx);
         }
 
         Arc::new(Self { sinks })

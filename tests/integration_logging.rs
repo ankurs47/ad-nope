@@ -17,7 +17,7 @@ async fn test_logging_config_instantiation() {
     };
 
     use ad_nope::logger::{QueryLogAction, QueryLogEntry, QueryLogger};
-    let logger = QueryLogger::new(config, vec![]);
+    let logger = QueryLogger::new(config.clone(), vec![], vec![]);
 
     logger
         .log(QueryLogEntry {

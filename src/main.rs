@@ -6,9 +6,8 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio::signal;
 use tracing::info;
 
-// mod api; // Removed per user request
 use ad_nope::config::Config;
-use ad_nope::engine::{BlocklistManager, StandardManager};
+use ad_nope::engine::{AppState, BlocklistManager, StandardManager};
 use ad_nope::logger::QueryLogger;
 use ad_nope::server::DnsHandler;
 use ad_nope::stats::StatsCollector;
@@ -61,10 +60,23 @@ async fn main() -> Result<()> {
         upstream_names,
         blocklist_names.clone(),
     );
-    let logger = QueryLogger::new(config.logging.clone(), blocklist_names);
+    // 3a. Init Memory Logger
+    let memory_sink = ad_nope::logger::MemoryLogSink::new(100); // Keep last 100 queries
+    let memory_buffer = memory_sink.clone_buffer();
+
+    // 3b. Init QueryLogger with MemorySink
+    let logger = QueryLogger::new(
+        config.logging.clone(),
+        blocklist_names,
+        vec![Box::new(memory_sink)],
+    );
+
     // 4. Init Blocklist Manager & Fetch Initial Lists
     let manager = Arc::new(StandardManager::new(config.clone()));
     let initial_matcher = manager.refresh().await;
+
+    // 6.5 Init AppState (Pause Control)
+    let app_state = AppState::new();
 
     // 5. Init Upstream Resolver
     let upstream_resolver =
@@ -77,27 +89,57 @@ async fn main() -> Result<()> {
         logger.clone(),
         initial_matcher,
         upstream_resolver.clone(),
+        app_state.clone(), // Pass AppState
     );
 
-    // 7. Spawn Periodic Updater
+    // 7. Spawn Periodic Updater & Initial Refresh Signal
     let update_interval = Duration::from_secs(config.updates.interval_hours * 3600);
     let manager_for_loop = manager.clone();
     let handler_clone = handler.clone();
 
+    // Channel for forcing refresh
+    let (refresh_tx, mut refresh_rx) = tokio::sync::mpsc::channel::<()>(1);
+
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(update_interval);
-        // The first tick completes immediately. Since we just refreshed in main(),
-        // we consume the first tick so the loop waits for the full duration before the next refresh.
+        // The first tick completes immediately
         interval.tick().await;
 
         loop {
-            interval.tick().await;
+            tokio::select! {
+                _ = interval.tick() => {
+                    info!("Scheduled blocklist update...");
+                }
+                _ = refresh_rx.recv() => {
+                    info!("Forced blocklist update triggered via API...");
+                    interval.reset(); // Reset timer to avoid double update
+                }
+            }
             let matcher = manager_for_loop.refresh().await;
             handler_clone.update_blocklist(matcher).await;
         }
     });
 
-    // 8. Start Server
+    // 8. Start API Server (Embedded UI)
+    let api_stats = stats.clone();
+    let api_state = app_state.clone();
+    let api_config = config.clone();
+    let api_refresh_tx = refresh_tx.clone();
+    let api_memory_buffer = memory_buffer;
+
+    tokio::spawn(async move {
+        ad_nope::api::start_api_server(
+            api_stats,
+            api_state,
+            api_config,
+            api_refresh_tx,
+            api_memory_buffer,
+            8080,
+        )
+        .await;
+    });
+
+    // 9. Start Server
     let mut server = ServerFuture::new(handler);
 
     let addr = SocketAddr::new(config.host.parse().unwrap(), config.port);

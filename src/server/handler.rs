@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::engine::BlocklistMatcher;
+use crate::engine::{AppState, BlocklistMatcher};
 use crate::logger::{QueryLogAction, QueryLogEntry, QueryLogger};
 use crate::resolver::DnsResolver;
 use crate::stats::StatsCollector;
@@ -28,16 +28,12 @@ pub struct DnsHandler {
     config: Config,
     stats: Arc<StatsCollector>,
     logger: Arc<QueryLogger>,
-    // Wrap in RwLock for hot-reloading
-    // We use Arc<ArcSwap<Arc<dyn ...>>> because Arc<dyn Trait> is a fat pointer
-    // and ArcSwap only supports Sized types (thin pointers) for the inner T unless using feature.
-    // Double Arc is a simple workaround.
+    app_state: AppState, // Added AppState
+    // ...
     blocklist: Arc<ArcSwap<Arc<dyn BlocklistMatcher>>>,
     resolver: Arc<dyn DnsResolver>,
-    // Cache: Key(Name, Type) -> (Records, ValidUntil, StaleUntil)
     #[allow(clippy::type_complexity)]
     cache: Cache<(Arc<str>, RecordType), (Arc<Vec<Record>>, Instant, Instant)>,
-    // Pre-calculated local records
     local_records: Arc<FxHashMap<String, Arc<Vec<Record>>>>,
 }
 
@@ -48,10 +44,12 @@ impl DnsHandler {
         logger: Arc<QueryLogger>,
         blocklist: Arc<dyn BlocklistMatcher>,
         resolver: Arc<dyn DnsResolver>,
+        app_state: AppState, // Added AppState arg
     ) -> Self {
+        // ... (cache creation)
         let cache = Cache::builder().max_capacity(config.cache.capacity).build();
 
-        // Pre-calculate local records
+        // ... (local records pre-calc logic stays same)
         let mut local_map = FxHashMap::default();
         let local_ttl = config.cache.min_ttl;
         for (domain, ip) in &config.local_records {
@@ -75,24 +73,11 @@ impl DnsHandler {
             }
         }
 
-        // Pre-calculate blocked records (templates)
-        // Note: The name will be replaced during query handling, so we use a placeholder here.
-        // Actually, for zero-copy we might just need the RData.
-        // But to reuse the existing structure, let's pre-build the RData.
-        // Wait, Record::from_rdata takes Name, which varies.
-        // So we can only pre-calculate the RData or use a dummy record and clone/modify?
-        // Modifying a Record is not zero-copy.
-        // Better strategy: Create the Record on the stack in serve_blocked using pre-made RData.
-        // But for strict "Arc<Vec<Record>>" consistency, let's keep it simple for now and just
-        // store the RData or standard empty loopback records.
-        // Actually, let's stick to the plan: "Stack Allocation in serve_blocked".
-        // So we don't strictly need these fields, but maybe pre-parsing the IP is good.
-        // Let's just store the RData for 0.0.0.0 and ::
-
         Self {
             config,
             stats,
             logger,
+            app_state, // Init field
             blocklist: Arc::new(ArcSwap::new(Arc::new(blocklist))),
             resolver,
             cache,
@@ -224,6 +209,8 @@ impl DnsHandler {
         source_id: u8,
     ) -> ResponseInfo {
         self.stats.inc_blocked_by_source(source_id);
+        self.stats.inc_client_block(request.src().ip().to_string());
+        self.stats.inc_domain_block(query.name.to_string());
 
         let record_opt = match query.qtype {
             RecordType::A => {
@@ -323,7 +310,13 @@ impl DnsHandler {
         response_handle: R,
         query: &QueryContext,
     ) -> Result<ResponseInfo, R> {
-        // 1. Check Blocklist
+        // 1. Check Pause State
+        if !self.app_state.is_blocking_active() {
+            // Blocking is paused, behave as if no blocklist match found.
+            return Err(response_handle);
+        }
+
+        // 2. Check Blocklist
         if let Some(source_id) = self.check_blocklist(&query.name) {
             Ok(self
                 .serve_blocked(request, response_handle, query.clone(), source_id)
@@ -442,8 +435,10 @@ impl RequestHandler for DnsHandler {
         response_handle: R,
     ) -> ResponseInfo {
         self.stats.inc_queries();
+        self.stats.inc_client_query(request.src().ip().to_string());
 
         let query_ctx = self.get_query_info(request).await;
+        self.stats.inc_domain_query(query_ctx.name.to_string());
 
         let response_handle = match self
             .handle_local_records(request, response_handle, &query_ctx)

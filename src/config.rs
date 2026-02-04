@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     #[serde(default = "default_host")]
     pub host: String,
@@ -45,7 +45,7 @@ pub struct Config {
     pub stats: StatsConfig,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CacheConfig {
     #[serde(default = "default_cache_enable")]
     pub enable: bool,
@@ -57,7 +57,7 @@ pub struct CacheConfig {
     pub min_ttl: u32,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct UpdateConfig {
     #[serde(default = "default_update_interval")]
     pub interval_hours: u64,
@@ -68,7 +68,7 @@ pub struct UpdateConfig {
 fn default_min_ttl() -> u32 {
     300
 }
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct LoggingConfig {
     #[serde(default = "default_log_enable")]
     pub enable: bool,
@@ -94,7 +94,7 @@ pub struct LoggingConfig {
     pub sqlite_retention_hours: u64,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct StatsConfig {
     #[serde(default = "default_stats_enable")]
     pub enable: bool,

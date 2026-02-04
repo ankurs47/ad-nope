@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ad-Nope Control Panel</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body
+    class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 min-h-screen flex flex-col font-sans transition-colors duration-200"
+    :class="{ 'dark': darkMode }" x-data="app()" x-cloak>
+
+    <!-- Header -->
+    <header
+        class="bg-white dark:bg-gray-800 shadow-sm z-10 border-b dark:border-gray-700 transition-colors duration-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center gap-3">
+                    <div
+                        class="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">
+                        A</div>
+                    <span class="text-xl font-bold text-gray-900 dark:text-white">Ad-Nope</span>
+                    <span x-show="!loading"
+                        class="px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide transition-colors"
+                        :class="status.blocking_active ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200' : 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'"
+                        x-text="status.blocking_active ? 'Active' : 'Paused'">
+                    </span>
+                </div>
+                <div class="flex items-center gap-4">
+                    <!-- Theme Toggle -->
+                    <button @click="toggleTheme()"
+                        class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <!-- Sun Icon -->
+                        <svg x-show="!darkMode" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                        <!-- Moon Icon -->
+                        <svg x-show="darkMode" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                            style="display: none;">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path>
+                        </svg>
+                    </button>
+                    <span class="text-sm text-gray-500 dark:text-gray-400" x-text="'v0.1.0'"></span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- Tabs Navigation -->
+        <div
+            class="flex space-x-1 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm w-fit mb-8 border border-gray-200 dark:border-gray-700 transition-colors">
+            <template x-for="tab in ['stats', 'logs', 'controls', 'settings']">
+                <button @click="currentTab = tab"
+                    class="px-4 py-2 font-medium text-sm rounded-md transition-colors capitalize"
+                    :class="currentTab === tab
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700'">
+                    <span x-text="tab === 'stats' ? 'Dashboard' : (tab === 'logs' ? 'Query Logs' : tab)"></span>
+                </button>
+            </template>
+        </div>
+
+        <!-- Tab: Stats (Dashboard) -->
+        <div x-show="currentTab === 'stats'" x-transition.opacity>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <!-- Stat Cards -->
+                <div
+                    class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
+                    <div class="text-gray-500 dark:text-gray-400 text-sm font-medium uppercase tracking-wider mb-1">
+                        Total Queries</div>
+                    <div class="text-3xl font-bold text-blue-600 dark:text-blue-400"
+                        x-text="stats.total_queries.toLocaleString()"></div>
+                </div>
+                <div
+                    class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
+                    <div class="text-gray-500 dark:text-gray-400 text-sm font-medium uppercase tracking-wider mb-1">
+                        Blocked Queries</div>
+                    <div class="text-3xl font-bold text-red-500 dark:text-red-400"
+                        x-text="stats.blocked_queries.toLocaleString()"></div>
+                    <div class="mt-2 text-xs text-gray-400 dark:text-gray-500"
+                        x-text="calculatePercentage(stats.blocked_queries, stats.total_queries) + '% Block Rate'"></div>
+                </div>
+                <div
+                    class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
+                    <div class="text-gray-500 dark:text-gray-400 text-sm font-medium uppercase tracking-wider mb-1">
+                        Cache Hits</div>
+                    <div class="text-3xl font-bold text-purple-600 dark:text-purple-400"
+                        x-text="stats.cache_hits.toLocaleString()"></div>
+                    <div class="mt-2 text-xs text-gray-400 dark:text-gray-500"
+                        x-text="calculatePercentage(stats.cache_hits, stats.total_queries) + '% Hit Rate'"></div>
+                </div>
+            </div>
+
+            <!-- Top 5 Stats Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <!-- Top Clients -->
+                <div
+                    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden transition-colors">
+                    <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Top
+                            Clients (Queries)</h4>
+                    </div>
+                    <table class="min-w-full text-sm">
+                        <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                            <template x-if="stats.top_clients && stats.top_clients.length > 0">
+                                <template x-for="(item, index) in stats.top_clients" :key="item.name">
+                                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                        <td class="px-6 py-3 text-gray-900 dark:text-gray-200 font-mono"
+                                            x-text="item.name"></td>
+                                        <td class="px-6 py-3 text-right text-gray-500 dark:text-gray-400 font-medium"
+                                            x-text="item.count.toLocaleString()"></td>
+                                    </tr>
+                                </template>
+                            </template>
+                            <template x-if="!stats.top_clients || stats.top_clients.length === 0">
+                                <tr>
+                                    <td class="px-6 py-4 text-center text-gray-500 dark:text-gray-400 italic">No data
+                                        yet</td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Top Blocked Clients -->
+                <div
+                    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden transition-colors">
+                    <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Top
+                            Clients (Blocked)</h4>
+                    </div>
+                    <table class="min-w-full text-sm">
+                        <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                            <template x-if="stats.top_blocked_clients && stats.top_blocked_clients.length > 0">
+                                <template x-for="item in stats.top_blocked_clients" :key="item.name">
+                                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                        <td class="px-6 py-3 text-gray-900 dark:text-gray-200 font-mono"
+                                            x-text="item.name"></td>
+                                        <td class="px-6 py-3 text-right text-red-500 dark:text-red-400 font-medium"
+                                            x-text="item.count.toLocaleString()"></td>
+                                    </tr>
+                                </template>
+                            </template>
+                            <template x-if="!stats.top_blocked_clients || stats.top_blocked_clients.length === 0">
+                                <tr>
+                                    <td class="px-6 py-4 text-center text-gray-500 dark:text-gray-400 italic">No data
+                                        yet</td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Top Domains -->
+                <div
+                    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden transition-colors">
+                    <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Top
+                            Permitted Domains</h4>
+                    </div>
+                    <table class="min-w-full text-sm">
+                        <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                            <template x-if="stats.top_domains && stats.top_domains.length > 0">
+                                <template x-for="item in stats.top_domains" :key="item.name">
+                                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                        <td class="px-6 py-3 text-gray-900 dark:text-gray-200 truncate max-w-xs"
+                                            x-text="item.name"></td>
+                                        <td class="px-6 py-3 text-right text-gray-500 dark:text-gray-400 font-medium"
+                                            x-text="item.count.toLocaleString()"></td>
+                                    </tr>
+                                </template>
+                            </template>
+                            <template x-if="!stats.top_domains || stats.top_domains.length === 0">
+                                <tr>
+                                    <td class="px-6 py-4 text-center text-gray-500 dark:text-gray-400 italic">No data
+                                        yet</td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Top Blocked Domains -->
+                <div
+                    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden transition-colors">
+                    <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Top
+                            Blocked Domains</h4>
+                    </div>
+                    <table class="min-w-full text-sm">
+                        <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                            <template x-if="stats.top_blocked_domains && stats.top_blocked_domains.length > 0">
+                                <template x-for="item in stats.top_blocked_domains" :key="item.name">
+                                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                        <td class="px-6 py-3 text-gray-900 dark:text-gray-200 truncate max-w-xs"
+                                            x-text="item.name"></td>
+                                        <td class="px-6 py-3 text-right text-red-500 dark:text-red-400 font-medium"
+                                            x-text="item.count.toLocaleString()"></td>
+                                    </tr>
+                                </template>
+                            </template>
+                            <template x-if="!stats.top_blocked_domains || stats.top_blocked_domains.length === 0">
+                                <tr>
+                                    <td class="px-6 py-4 text-center text-gray-500 dark:text-gray-400 italic">No data
+                                        yet</td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <template x-if="!status.blocking_active">
+                <div
+                    class="bg-amber-50 dark:bg-amber-900/30 border-l-4 border-amber-500 p-4 rounded-r-md shadow-sm mb-6">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd"
+                                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm text-amber-700 dark:text-amber-200">
+                                Blocking is currently paused.
+                                <span x-show="status.pause_remaining_secs > 0">
+                                    Resuming in <span class="font-bold"
+                                        x-text="formatTime(status.pause_remaining_secs)"></span>.
+                                </span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Tab: Logs -->
+        <div x-show="currentTab === 'logs'" x-transition.opacity>
+            <div
+                class="bg-white dark:bg-gray-800 shadow-sm rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden transition-colors">
+
+                <!-- Filters Toolbar -->
+                <div
+                    class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div class="flex items-center gap-2">
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Recent Queries</h3>
+                        <div
+                            class="flex items-center gap-2 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-xs font-medium">
+                            <div class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                            Live
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <!-- Search Input -->
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24"
+                                    stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
+                            <input type="text" x-model="filters.search"
+                                class="pl-10 pr-4 py-2 text-sm border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 w-full sm:w-64"
+                                placeholder="Filter Domain or Client...">
+                        </div>
+
+                        <!-- Action Dropdown -->
+                        <select x-model="filters.action"
+                            class="pl-3 pr-8 py-2 text-sm border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100">
+                            <option value="All">All Actions</option>
+                            <option value="Blocked">Blocked</option>
+                            <option value="Allowed">Allowed</option>
+                            <option value="Cached">Cached</option>
+                            <option value="Local">Local</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead class="bg-gray-50 dark:bg-gray-700/50">
+                            <tr>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">
+                                    Latency</th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                    Domain</th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                    Client</th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                    Action</th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                    Details</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                            <template x-for="log in filteredLogs" :key="log.domain + log.latency_ms + Math.random()">
+                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group">
+                                    <td class="px-6 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap"
+                                        x-text="log.latency_ms + 'ms'"></td>
+
+                                    <td class="px-6 py-3 text-sm text-gray-900 dark:text-gray-200 font-medium truncate max-w-xs"
+                                        :title="log.domain">
+                                        <div class="flex items-center gap-2">
+                                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold font-mono border"
+                                                :class="{
+                                                      'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800': log.query_type === 'A',
+                                                      'bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-800': log.query_type === 'AAAA',
+                                                      'bg-gray-50 text-gray-600 border-gray-100 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700': log.query_type !== 'A' && log.query_type !== 'AAAA'
+                                                  }" x-text="log.query_type"></span>
+                                            <span x-text="log.domain"></span>
+                                        </div>
+                                    </td>
+
+                                    <td class="px-6 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono"
+                                        x-text="log.client_ip"></td>
+
+                                    <td class="px-6 py-3">
+                                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full"
+                                            :class="{
+                                                  'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200': log.action === 'Allowed' || log.action === 'Forwarded' || log.action === 'Local',
+                                                  'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200': log.action === 'Blocked',
+                                                  'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200': log.action === 'Cached'
+                                              }" x-text="log.action">
+                                        </span>
+                                    </td>
+
+                                    <td class="px-6 py-3 text-sm text-gray-500 dark:text-gray-400">
+                                        <div class="flex flex-col gap-0.5">
+                                            <span x-show="log.upstream" class="flex items-center gap-1"
+                                                title="Upstream Server">
+                                                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24"
+                                                    stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                                                </svg>
+                                                <span x-text="log.upstream"></span>
+                                            </span>
+                                            <span x-show="log.ttl_remaining != null" class="flex items-center gap-1"
+                                                title="TTL">
+                                                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24"
+                                                    stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                <span x-text="'TTL: ' + formatTime(log.ttl_remaining)"></span>
+                                            </span>
+                                            <span x-show="log.action === 'Blocked' && log.source_id !== null"
+                                                class="flex items-center gap-1 text-red-500 dark:text-red-400"
+                                                title="Blocklist Source">
+                                                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24"
+                                                    stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                </svg>
+                                                <span x-text="'List: ' + getBlocklistName(log.source_id)"></span>
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="filteredLogs.length === 0">
+                                <td colspan="6" class="px-6 py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
+                                    <span x-show="logs.length > 0">No queries match your filter.</span>
+                                    <span x-show="logs.length === 0">No queries recorded yet.</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div
+                    class="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-xs text-gray-500 dark:text-gray-400 flex justify-between">
+                    <span x-text="`Showing ${filteredLogs.length} of ${logs.length} queries`"></span>
+                    <span>Auto-refreshing every 2s</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Controls -->
+        <div x-show="currentTab === 'controls'" x-transition.opacity>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Blocking Control -->
+                <div
+                    class="bg-white dark:bg-gray-800 shadow-sm rounded-xl border border-gray-200 dark:border-gray-700 p-6 transition-colors">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Blocking Status</h3>
+
+                    <div class="mb-6 flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <div>
+                            <p class="text-sm font-medium text-gray-900 dark:text-gray-200">Current State</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400"
+                                x-text="status.blocking_active ? 'Ad-blocking is enabled.' : 'Ad-blocking is temporarily suspended.'">
+                            </p>
+                        </div>
+                        <div class="h-3 w-3 rounded-full"
+                            :class="status.blocking_active ? 'bg-emerald-500' : 'bg-amber-500'"></div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Pause Blocking</h4>
+                        <div class="flex gap-2">
+                            <template x-for="min in [1, 5, 30]">
+                                <button @click="pauseBlocking(min)" :disabled="!status.blocking_active"
+                                    class="flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors border"
+                                    :class="status.blocking_active
+                                            ? 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600'
+                                            : 'bg-gray-100 dark:bg-gray-800 border-transparent text-gray-400 dark:text-gray-600 cursor-not-allowed'">
+                                    <span x-text="min"></span> Min
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                    <div class="mt-6" x-show="!status.blocking_active">
+                        <button @click="resumeBlocking()"
+                            class="w-full py-2 px-4 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm transition-colors">
+                            Re-enable Blocking Immediately
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Update Control -->
+                <div
+                    class="bg-white dark:bg-gray-800 shadow-sm rounded-xl border border-gray-200 dark:border-gray-700 p-6 transition-colors">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Blocklist Updates</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                        Force an immediate download and parsing of the latest blocklists from upstream sources. This may
+                        take a few seconds.
+                    </p>
+                    <button @click="triggerRefresh()" :disabled="refreshing"
+                        class="w-full py-2 px-4 rounded-md font-medium text-white transition-colors flex items-center justify-center gap-2"
+                        :class="refreshing ? 'bg-blue-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700'">
+                        <svg x-show="refreshing" class="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            </circle>
+                            <path class="opacity-75" fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                            </path>
+                        </svg>
+                        <span x-text="refreshing ? 'Updating...' : 'Update Blocklists Now'"></span>
+                    </button>
+                    <p x-show="refreshSuccess" x-transition.leave.duration.1000ms
+                        class="mt-4 text-sm text-emerald-600 dark:text-emerald-400 font-medium text-center">
+                        ✓ Update signal sent successfully.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Settings (Read Only) -->
+        <div x-show="currentTab === 'settings'" x-transition.opacity>
+            <div
+                class="bg-white dark:bg-gray-800 shadow-sm rounded-xl border border-gray-200 dark:border-gray-700 p-6 overflow-hidden transition-colors">
+                <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Current Configuration</h3>
+                <div class="bg-gray-900 rounded-lg p-4 overflow-x-auto">
+                    <pre class="text-xs text-green-400 font-mono" x-text="JSON.stringify(config, null, 2)"></pre>
+                </div>
+                <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">Settings are read-only via UI. Edit
+                    <code>config.toml</code> and restart to change.
+                </p>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto transition-colors">
+        <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <p class="text-center text-sm text-gray-500 dark:text-gray-400">
+                &copy; 2026 Ad-Nope. Powered by Rust & Antigravity.
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('app', () => ({
+                currentTab: 'stats',
+                stats: { total_queries: 0, blocked_queries: 0, cache_hits: 0 },
+                status: { blocking_active: true, pause_remaining_secs: 0 },
+                logs: [],
+                config: {},
+                blocklistNames: [], // Sorted array of names
+                filters: {
+                    search: '',
+                    action: 'All'
+                },
+                loading: true,
+                refreshing: false,
+                refreshSuccess: false,
+                darkMode: localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches),
+
+                init() {
+                    // Watch for theme changes
+                    this.$watch('darkMode', val => {
+                        localStorage.setItem('theme', val ? 'dark' : 'light');
+                        if (val) {
+                            document.documentElement.classList.add('dark');
+                        } else {
+                            document.documentElement.classList.remove('dark');
+                        }
+                    });
+
+                    // Initial theme apply
+                    if (this.darkMode) {
+                        document.documentElement.classList.add('dark');
+                    } else {
+                        document.documentElement.classList.remove('dark');
+                    }
+
+                    this.fetchData();
+                    this.fetchConfig();
+                    // Poll stats/status/logs every 2s
+                    setInterval(() => this.fetchData(), 2000);
+                },
+
+                toggleTheme() {
+                    this.darkMode = !this.darkMode;
+                },
+
+                get filteredLogs() {
+                    let result = this.logs;
+
+                    if (this.filters.action !== 'All') {
+                        result = result.filter(log => log.action === this.filters.action);
+                    }
+
+                    if (this.filters.search.trim() !== '') {
+                        const q = this.filters.search.trim().toLowerCase();
+                        result = result.filter(log =>
+                            log.domain.toLowerCase().includes(q) ||
+                            log.client_ip.includes(q)
+                        );
+                    }
+
+                    return result;
+                },
+
+                getBlocklistName(id) {
+                    if (id !== null && this.blocklistNames[id]) {
+                        return this.blocklistNames[id];
+                    }
+                    return 'Unknown List';
+                },
+
+                async fetchData() {
+                    try {
+                        const [statsRes, statusRes] = await Promise.all([
+                            fetch('/api/stats'),
+                            fetch('/api/status')
+                        ]);
+                        this.stats = await statsRes.json();
+                        this.status = await statusRes.json();
+
+                        // Lazy load logs only if tab is active to save bandwidth
+                        if (this.currentTab === 'logs') {
+                            const logsRes = await fetch('/api/logs');
+                            this.logs = await logsRes.json();
+                        }
+
+                        this.loading = false;
+                    } catch (e) {
+                        console.error('Fetch error:', e);
+                    }
+                },
+
+                async fetchConfig() {
+                    try {
+                        const res = await fetch('/api/config');
+                        this.config = await res.json();
+
+                        // Parse blocklists to cache names
+                        if (this.config.blocklists) {
+                            // Sort keys alphabetically to match rust's sorting for IDs
+                            this.blocklistNames = Object.keys(this.config.blocklists).sort();
+                        }
+                    } catch (e) {
+                        console.error('Config fetch error:', e);
+                    }
+                },
+
+                async pauseBlocking(minutes) {
+                    await fetch('/api/pause', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ duration_minutes: minutes })
+                    });
+                    this.fetchData();
+                },
+
+                async resumeBlocking() {
+                    await fetch('/api/resume', { method: 'POST' });
+                    this.fetchData();
+                },
+
+                async triggerRefresh() {
+                    this.refreshing = true;
+                    this.refreshSuccess = false;
+                    try {
+                        await fetch('/api/refresh', { method: 'POST' });
+                        this.refreshSuccess = true;
+                        // Hide success message after 3s
+                        setTimeout(() => { this.refreshSuccess = false; }, 3000);
+                    } catch (e) {
+                        alert('Failed to trigger refresh');
+                    } finally {
+                        this.refreshing = false;
+                    }
+                },
+
+                formatTime(seconds) {
+                    const m = Math.floor(seconds / 60);
+                    const s = seconds % 60;
+                    return `${m}m ${s}s`;
+                },
+
+                calculatePercentage(part, total) {
+                    if (!total) return 0;
+                    return Math.round((part / total) * 100);
+                }
+            }))
+        })
+    </script>
+</body>
+
+</html>
