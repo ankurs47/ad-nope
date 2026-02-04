@@ -53,6 +53,8 @@ pub struct CacheConfig {
     pub capacity: u64,
     #[serde(default = "default_grace_period")]
     pub grace_period_sec: u64,
+    #[serde(default = "default_min_ttl")]
+    pub min_ttl: u32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -63,6 +65,9 @@ pub struct UpdateConfig {
     pub concurrent_downloads: usize,
 }
 
+fn default_min_ttl() -> u32 {
+    300
+}
 #[derive(Debug, Deserialize, Clone)]
 pub struct LoggingConfig {
     #[serde(default = "default_log_enable")]
@@ -200,6 +205,7 @@ impl Default for CacheConfig {
             enable: default_cache_enable(),
             capacity: default_cache_capacity(),
             grace_period_sec: default_grace_period(),
+            min_ttl: default_min_ttl(),
         }
     }
 }

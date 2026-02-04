@@ -47,6 +47,7 @@ hagezi-nsfw = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard
 enable = true
 capacity = 10000
 grace_period_sec = 10
+min_ttl = 300
 
 # Updates
 [updates]

@@ -45,6 +45,7 @@ async fn test_background_re_resolution() {
     let mut config = Config::default();
     config.cache.grace_period_sec = 5; // Stale window: [1s, 6s]
     config.cache.capacity = 1000;
+    config.cache.min_ttl = 0; // Allow short TTL for testing
 
     let stats = StatsCollector::new(10, vec![], vec![]);
     let logger = QueryLogger::new(config.logging.clone(), vec![]);

@@ -53,18 +53,19 @@ impl DnsHandler {
 
         // Pre-calculate local records
         let mut local_map = FxHashMap::default();
+        let local_ttl = config.cache.min_ttl;
         for (domain, ip) in &config.local_records {
             let mut records = Vec::new();
             if let Ok(name) = Name::from_str(domain) {
                 match ip {
                     std::net::IpAddr::V4(ipv4) => {
                         let rdata = RData::A(A(*ipv4));
-                        let record = Record::from_rdata(name, 300, rdata);
+                        let record = Record::from_rdata(name, local_ttl, rdata);
                         records.push(record);
                     }
                     std::net::IpAddr::V6(ipv6) => {
                         let rdata = RData::AAAA(AAAA(*ipv6));
-                        let record = Record::from_rdata(name, 300, rdata);
+                        let record = Record::from_rdata(name, local_ttl, rdata);
                         records.push(record);
                     }
                 }
@@ -108,8 +109,13 @@ impl DnsHandler {
         let records = Arc::new(records);
 
         if !records.is_empty() {
-            let min_ttl = records.iter().map(|r| r.ttl()).min().unwrap_or(300);
-            let valid_until = Instant::now() + Duration::from_secs(min_ttl as u64);
+            // Find the minimum TTL among all records
+            let record_min_ttl = records.iter().map(|r| r.ttl()).min().unwrap_or(300);
+
+            // Enforce configured minimum TTL for caching purposes
+            let effective_ttl = std::cmp::max(record_min_ttl, self.config.cache.min_ttl);
+
+            let valid_until = Instant::now() + Duration::from_secs(effective_ttl as u64);
             let stale_until = valid_until + Duration::from_secs(self.config.cache.grace_period_sec);
             self.cache
                 .insert(
@@ -118,6 +124,7 @@ impl DnsHandler {
                 )
                 .await;
         }
+
         Ok((records, upstream))
     }
 
