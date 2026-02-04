@@ -55,6 +55,7 @@ tokio-util = { version = "0.7.18", features = ["time", "io"] }
 arc-swap = "1.8.1"
 rustc-hash = "2.1.1"
 smol_str = "0.3.5"
+dashmap = "6.1.0"
 
 [build-dependencies]
 minify-html = "0.18.1"

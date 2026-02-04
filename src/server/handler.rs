@@ -209,8 +209,8 @@ impl DnsHandler {
         source_id: u8,
     ) -> ResponseInfo {
         self.stats.inc_blocked_by_source(source_id);
-        self.stats.inc_client_block(request.src().ip().to_string());
-        self.stats.inc_domain_block(query.name.to_string());
+        self.stats.inc_client_block(request.src().ip());
+        self.stats.inc_domain_block(query.name.clone());
 
         let record_opt = match query.qtype {
             RecordType::A => {
@@ -435,10 +435,10 @@ impl RequestHandler for DnsHandler {
         response_handle: R,
     ) -> ResponseInfo {
         self.stats.inc_queries();
-        self.stats.inc_client_query(request.src().ip().to_string());
+        self.stats.inc_client_query(request.src().ip());
 
         let query_ctx = self.get_query_info(request).await;
-        self.stats.inc_domain_query(query_ctx.name.to_string());
+        self.stats.inc_domain_query(query_ctx.name.clone());
 
         let response_handle = match self
             .handle_local_records(request, response_handle, &query_ctx)

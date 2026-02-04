@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use dashmap::DashMap;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::time::{self, Duration};
 use tracing::info;
 
@@ -17,11 +18,13 @@ pub struct StatsCollector {
     blocked_queries: AtomicU64,
     cache_hits: AtomicU64,
 
-    // Granular Stats (Protected by RwLock)
-    client_queries: RwLock<HashMap<String, u64>>,
-    client_blocks: RwLock<HashMap<String, u64>>,
-    domain_queries: RwLock<HashMap<String, u64>>,
-    domain_blocks: RwLock<HashMap<String, u64>>,
+    // Granular Stats (High Concurrency with DashMap)
+    // Key: IpAddr (Copy, no allocation)
+    client_queries: DashMap<IpAddr, u64>,
+    client_blocks: DashMap<IpAddr, u64>,
+    // Key: Arc<str> (Cheap clone, shares with QueryContext)
+    domain_queries: DashMap<Arc<str>, u64>,
+    domain_blocks: DashMap<Arc<str>, u64>,
 
     // Max 256 sources (u8 key).
     blocks_by_source: [AtomicU64; 256],
@@ -45,10 +48,10 @@ impl StatsCollector {
             total_queries: AtomicU64::new(0),
             blocked_queries: AtomicU64::new(0),
             cache_hits: AtomicU64::new(0),
-            client_queries: RwLock::new(HashMap::new()),
-            client_blocks: RwLock::new(HashMap::new()),
-            domain_queries: RwLock::new(HashMap::new()),
-            domain_blocks: RwLock::new(HashMap::new()),
+            client_queries: DashMap::new(),
+            client_blocks: DashMap::new(),
+            domain_queries: DashMap::new(),
+            domain_blocks: DashMap::new(),
             blocks_by_source: [0; 256].map(|_| AtomicU64::new(0)),
             upstream_total_ms: [0; 16].map(|_| AtomicU64::new(0)),
             upstream_count: [0; 16].map(|_| AtomicU64::new(0)),
@@ -83,28 +86,20 @@ impl StatsCollector {
         self.blocks_by_source[source_id as usize].fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn inc_client_query(&self, client: String) {
-        if let Ok(mut map) = self.client_queries.write() {
-            *map.entry(client).or_insert(0) += 1;
-        }
+    pub fn inc_client_query(&self, client: IpAddr) {
+        *self.client_queries.entry(client).or_insert(0) += 1;
     }
 
-    pub fn inc_client_block(&self, client: String) {
-        if let Ok(mut map) = self.client_blocks.write() {
-            *map.entry(client).or_insert(0) += 1;
-        }
+    pub fn inc_client_block(&self, client: IpAddr) {
+        *self.client_blocks.entry(client).or_insert(0) += 1;
     }
 
-    pub fn inc_domain_query(&self, domain: String) {
-        if let Ok(mut map) = self.domain_queries.write() {
-            *map.entry(domain).or_insert(0) += 1;
-        }
+    pub fn inc_domain_query(&self, domain: Arc<str>) {
+        *self.domain_queries.entry(domain).or_insert(0) += 1;
     }
 
-    pub fn inc_domain_block(&self, domain: String) {
-        if let Ok(mut map) = self.domain_blocks.write() {
-            *map.entry(domain).or_insert(0) += 1;
-        }
+    pub fn inc_domain_block(&self, domain: Arc<str>) {
+        *self.domain_blocks.entry(domain).or_insert(0) += 1;
     }
 
     pub fn record_upstream_latency(&self, upstream_idx: usize, ms: u64) {
@@ -180,20 +175,19 @@ impl StatsCollector {
         );
     }
 
-    fn get_top_k(&self, map: &RwLock<HashMap<String, u64>>, k: usize) -> Vec<TopItem> {
-        if let Ok(map) = map.read() {
-            let mut items: Vec<_> = map
-                .iter()
-                .map(|(k, v)| TopItem {
-                    name: k.clone(),
-                    count: *v,
-                })
-                .collect();
-            items.sort_by(|a, b| b.count.cmp(&a.count)); // Descending
-            items.into_iter().take(k).collect()
-        } else {
-            vec![]
-        }
+    fn get_top_k<K>(&self, map: &DashMap<K, u64>, k: usize) -> Vec<TopItem>
+    where
+        K: ToString + std::cmp::Eq + std::hash::Hash + Clone,
+    {
+        let mut items: Vec<_> = map
+            .iter()
+            .map(|r| TopItem {
+                name: r.key().to_string(),
+                count: *r.value(),
+            })
+            .collect();
+        items.sort_by(|a, b| b.count.cmp(&a.count)); // Descending
+        items.into_iter().take(k).collect()
     }
 
     pub fn get_snapshot(&self) -> StatsSnapshot {
