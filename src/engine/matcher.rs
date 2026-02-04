@@ -1,19 +1,19 @@
 use super::traits::BlocklistMatcher;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
-/// Optimized in-memory matcher using HashMap<String, u8>
+/// Optimized in-memory matcher using FxHashMap<Box<str>, u8>
 #[derive(Debug)]
 pub struct HashedMatcher {
     // Map domain -> source_id
-    domains: HashMap<String, u8>,
-    allowlist: HashMap<String, ()>,
+    domains: FxHashMap<Box<str>, u8>,
+    allowlist: FxHashMap<Box<str>, ()>,
 }
 
 impl HashedMatcher {
-    pub fn new(domains: HashMap<String, u8>, allowlist_vec: Vec<String>) -> Self {
-        let mut allowlist = HashMap::new();
+    pub fn new(domains: FxHashMap<Box<str>, u8>, allowlist_vec: Vec<String>) -> Self {
+        let mut allowlist = FxHashMap::default();
         for d in allowlist_vec {
-            allowlist.insert(d, ());
+            allowlist.insert(d.into_boxed_str(), ());
         }
         Self { domains, allowlist }
     }
@@ -55,9 +55,9 @@ mod tests {
 
     #[test]
     fn test_matcher_logic() {
-        let mut map = HashMap::new();
-        map.insert("example.com".to_string(), 1);
-        map.insert("sub.ad.com".to_string(), 2);
+        let mut map = FxHashMap::default();
+        map.insert("example.com".to_string().into_boxed_str(), 1);
+        map.insert("sub.ad.com".to_string().into_boxed_str(), 2);
 
         let allowlist = vec!["allowed.example.com".to_string()];
 

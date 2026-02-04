@@ -4,6 +4,7 @@ use crate::logger::{QueryLogAction, QueryLogEntry, QueryLogger};
 use crate::resolver::DnsResolver;
 use crate::stats::StatsCollector;
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use hickory_server::authority::MessageResponseBuilder;
 use hickory_server::proto::op::ResponseCode;
 use hickory_server::proto::rr::{
@@ -25,10 +26,14 @@ pub struct DnsHandler {
     stats: Arc<StatsCollector>,
     logger: Arc<QueryLogger>,
     // Wrap in RwLock for hot-reloading
-    blocklist: Arc<tokio::sync::RwLock<Arc<dyn BlocklistMatcher>>>,
+    // We use Arc<ArcSwap<Arc<dyn ...>>> because Arc<dyn Trait> is a fat pointer
+    // and ArcSwap only supports Sized types (thin pointers) for the inner T unless using feature.
+    // Double Arc is a simple workaround.
+    blocklist: Arc<ArcSwap<Arc<dyn BlocklistMatcher>>>,
     resolver: Arc<dyn DnsResolver>,
     // Cache: Key(Name, Type) -> (Records, ValidUntil, StaleUntil)
-    cache: Cache<(String, RecordType), (Vec<Record>, Instant, Instant)>,
+    #[allow(clippy::type_complexity)]
+    cache: Cache<(Arc<str>, RecordType), (Vec<Record>, Instant, Instant)>,
 }
 
 impl DnsHandler {
@@ -45,7 +50,7 @@ impl DnsHandler {
             config,
             stats,
             logger,
-            blocklist: Arc::new(tokio::sync::RwLock::new(blocklist)),
+            blocklist: Arc::new(ArcSwap::new(Arc::new(blocklist))),
             resolver,
             cache,
         }
@@ -63,7 +68,7 @@ impl DnsHandler {
             let stale_until = valid_until + Duration::from_secs(self.config.cache.grace_period_sec);
             self.cache
                 .insert(
-                    (name.to_string(), qtype),
+                    (Arc::from(name), qtype),
                     (records.clone(), valid_until, stale_until),
                 )
                 .await;
@@ -73,35 +78,37 @@ impl DnsHandler {
 
     pub async fn update_blocklist(&self, new_blocklist: Arc<dyn BlocklistMatcher>) {
         info!("Updating active blocklist...");
-        let mut lock = self.blocklist.write().await;
-        *lock = new_blocklist;
+        self.blocklist.store(Arc::new(new_blocklist));
         info!("Active blocklist updated.");
     }
 
     async fn get_query_info(&self, request: &Request) -> QueryContext {
         let query = request.queries().first().expect("No query in request");
         let name = query.name();
-        let name_str = name.to_string().trim_end_matches('.').to_lowercase();
+
+        let mut name_str = name.to_string();
+        if name_str.ends_with('.') {
+            name_str.pop();
+        }
+        name_str.make_ascii_lowercase();
+
         QueryContext {
-            name: name_str,
+            name: name_str.into(),
             qtype: query.query_type(),
             start: Instant::now(),
         }
     }
 
-    async fn check_blocklist(&self, name: &str) -> Option<u8> {
-        let lock = self.blocklist.read().await;
-        lock.check(name)
+    fn check_blocklist(&self, name: &str) -> Option<u8> {
+        self.blocklist.load().check(name)
     }
 
     async fn check_cache(
         &self,
-        name: &str,
+        name: Arc<str>,
         qtype: RecordType,
     ) -> Option<(Vec<Record>, bool, Option<u64>)> {
-        if let Some((records, valid_until, stale_until)) =
-            self.cache.get(&(name.to_string(), qtype)).await
-        {
+        if let Some((records, valid_until, stale_until)) = self.cache.get(&(name, qtype)).await {
             let now = Instant::now();
             let ttl = if valid_until > now {
                 Some(valid_until.duration_since(now).as_secs())
@@ -138,7 +145,7 @@ impl DnsHandler {
         self.logger
             .log(QueryLogEntry {
                 client_ip: request.src().to_string(),
-                domain: query.name,
+                domain: query.name.to_string(),
                 query_type: query.qtype.to_string(),
                 action: log.action,
                 source_id: log.source_id,
@@ -190,7 +197,7 @@ impl DnsHandler {
             self.logger
                 .log(QueryLogEntry {
                     client_ip: request.src().to_string(),
-                    domain: query.name.clone(),
+                    domain: query.name.to_string(),
                     query_type: query.qtype.to_string(),
                     action: QueryLogAction::Blocked,
                     source_id: Some(source_id),
@@ -222,26 +229,22 @@ impl DnsHandler {
         response_handle: R,
         query: &QueryContext,
     ) -> Result<ResponseInfo, R> {
-        if let Some(ip_str) = self.config.local_records.get(&query.name) {
+        if let Some(&ip_addr) = self.config.local_records.get(&*query.name) {
             let mut records = Vec::new();
-            if let Ok(ip_addr) = ip_str.parse::<std::net::IpAddr>() {
-                match (query.qtype, ip_addr) {
-                    (RecordType::A, std::net::IpAddr::V4(ipv4)) => {
-                        let rdata = RData::A(A(ipv4));
-                        let record =
-                            Record::from_rdata(request.queries()[0].name().into(), 300, rdata);
-                        records.push(record);
-                    }
-                    (RecordType::AAAA, std::net::IpAddr::V6(ipv6)) => {
-                        let rdata = RData::AAAA(AAAA(ipv6));
-                        let record =
-                            Record::from_rdata(request.queries()[0].name().into(), 300, rdata);
-                        records.push(record);
-                    }
-                    _ => {
-                        // Mismatch type (e.g. AAAA query for v4 IP) or other types.
-                        // Return NODATA (empty records).
-                    }
+            // IP is already parsed in config
+            match (query.qtype, ip_addr) {
+                (RecordType::A, std::net::IpAddr::V4(ipv4)) => {
+                    let rdata = RData::A(A(ipv4));
+                    let record = Record::from_rdata(request.queries()[0].name().into(), 300, rdata);
+                    records.push(record);
+                }
+                (RecordType::AAAA, std::net::IpAddr::V6(ipv6)) => {
+                    let rdata = RData::AAAA(AAAA(ipv6));
+                    let record = Record::from_rdata(request.queries()[0].name().into(), 300, rdata);
+                    records.push(record);
+                }
+                _ => {
+                    // Mismatch type
                 }
             }
 
@@ -271,7 +274,7 @@ impl DnsHandler {
         query: &QueryContext,
     ) -> Result<ResponseInfo, R> {
         // 1. Check Blocklist
-        if let Some(source_id) = self.check_blocklist(&query.name).await {
+        if let Some(source_id) = self.check_blocklist(&query.name) {
             Ok(self
                 .serve_blocked(request, response_handle, query.clone(), source_id)
                 .await)
@@ -287,7 +290,9 @@ impl DnsHandler {
         query: &QueryContext,
     ) -> Result<ResponseInfo, R> {
         // 2. Check Cache
-        if let Some((records, is_stale, ttl)) = self.check_cache(&query.name, query.qtype).await {
+        if let Some((records, is_stale, ttl)) =
+            self.check_cache(query.name.clone(), query.qtype).await
+        {
             self.stats.inc_cache_hit();
             if is_stale {
                 // Trigger background refresh
@@ -361,7 +366,7 @@ impl DnsHandler {
                 self.logger
                     .log(QueryLogEntry {
                         client_ip: request.src().to_string(),
-                        domain: query.name,
+                        domain: query.name.to_string(),
                         query_type: query.qtype.to_string(),
                         action: QueryLogAction::Forwarded,
                         source_id: None,

@@ -50,8 +50,13 @@ impl QueryLogger {
     }
 
     pub async fn log(&self, entry: QueryLogEntry) {
-        for sink in &self.sinks {
+        let len = self.sinks.len();
+        for (i, sink) in self.sinks.iter().enumerate() {
             // Fire and forget, don't block caller if buffer full
+            if i == len - 1 {
+                let _ = sink.try_send(entry);
+                break;
+            }
             let _ = sink.try_send(entry.clone());
         }
     }

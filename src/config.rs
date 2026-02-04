@@ -39,7 +39,7 @@ pub struct Config {
     pub logging: LoggingConfig,
 
     #[serde(default)]
-    pub local_records: HashMap<String, String>,
+    pub local_records: HashMap<String, std::net::IpAddr>,
 
     #[serde(default)]
     pub stats: StatsConfig,

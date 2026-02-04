@@ -3,8 +3,10 @@ use super::traits::{BlocklistManager, BlocklistMatcher};
 use crate::config::Config;
 use futures::{stream, StreamExt};
 use reqwest::Client;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio_util::io::StreamReader;
 use tracing::{error, info};
 
 pub struct StandardManager {
@@ -20,19 +22,22 @@ impl StandardManager {
         }
     }
 
-    fn parse_blocklist_content(text: &str, source_id: u8) -> Vec<(String, u8)> {
-        let mut entries = Vec::new();
-        for line in text.lines() {
-            let line = line.trim();
-            // Skip comments and empty lines
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-
-            // Simple domain list format: one domain per line
-            entries.push((line.to_string(), source_id));
+    fn parse_line(line: &str) -> Option<Box<str>> {
+        let line = line.trim();
+        // Skip comments and empty lines
+        if line.is_empty() || line.starts_with('#') {
+            return None;
         }
-        entries
+        // Simple domain list format: one domain per line
+        // Normalize to lowercase
+        Some(line.to_lowercase().into_boxed_str())
+    }
+
+    #[cfg(test)]
+    fn parse_blocklist_content(text: &str, source_id: u8) -> Vec<(Box<str>, u8)> {
+        text.lines()
+            .filter_map(|line| Self::parse_line(line).map(|d| (d, source_id)))
+            .collect()
     }
 
     async fn fetch_and_parse(
@@ -40,28 +45,34 @@ impl StandardManager {
         name: String,
         url: String,
         source_id: u8,
-    ) -> Vec<(String, u8)> {
+    ) -> Vec<(Box<str>, u8)> {
         info!(
             "Fetching blocklist '{}' (ID {}) from {}",
             name, source_id, url
         );
         match client.get(&url).send().await {
-            Ok(resp) => match resp.text().await {
-                Ok(text) => {
-                    let entries = Self::parse_blocklist_content(&text, source_id);
-                    info!(
-                        "Parsed {} entries from '{}' (ID {})",
-                        entries.len(),
-                        name,
-                        source_id
-                    );
-                    entries
+            Ok(resp) => {
+                let stream = resp
+                    .bytes_stream()
+                    .map(|result| result.map_err(std::io::Error::other));
+                let reader = StreamReader::new(stream);
+                let mut lines = BufReader::new(reader).lines();
+                let mut entries = Vec::new();
+
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Some(domain) = Self::parse_line(&line) {
+                        entries.push((domain, source_id));
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to read body from {}: {}", url, e);
-                    vec![]
-                }
-            },
+
+                info!(
+                    "Parsed {} entries from '{}' (ID {})",
+                    entries.len(),
+                    name,
+                    source_id
+                );
+                entries
+            }
             Err(e) => {
                 error!("Failed to fetch {}: {}", url, e);
                 vec![]
@@ -89,12 +100,12 @@ impl BlocklistManager for StandardManager {
                 async move { Self::fetch_and_parse(&client, name, url.clone(), source_id).await }
             });
 
-        let results: Vec<Vec<(String, u8)>> = stream::iter(tasks)
+        let results: Vec<Vec<(Box<str>, u8)>> = stream::iter(tasks)
             .buffer_unordered(self.config.updates.concurrent_downloads)
             .collect()
             .await;
 
-        let mut map = HashMap::new();
+        let mut map = FxHashMap::default();
         let mut total_count = 0;
 
         for list in results {
@@ -131,8 +142,11 @@ mod tests {
 
         let entries = StandardManager::parse_blocklist_content(content, 1);
         assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0], ("example.com".to_string(), 1));
-        assert_eq!(entries[1], ("adserver.net".to_string(), 1));
-        assert_eq!(entries[2], ("justadomain.com".to_string(), 1));
+        assert_eq!(entries[0], ("example.com".to_string().into_boxed_str(), 1));
+        assert_eq!(entries[1], ("adserver.net".to_string().into_boxed_str(), 1));
+        assert_eq!(
+            entries[2],
+            ("justadomain.com".to_string().into_boxed_str(), 1)
+        );
     }
 }
