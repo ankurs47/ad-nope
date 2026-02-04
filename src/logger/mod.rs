@@ -80,16 +80,16 @@ mod tests {
     #[test]
     fn test_log_entry_fields() {
         let entry = QueryLogEntry {
-            client_ip: "127.0.0.1".to_string(),
-            domain: "example.com".to_string(),
-            query_type: "A".to_string(),
+            client_ip: "127.0.0.1".parse().unwrap(),
+            domain: "example.com".into(),
+            query_type: hickory_server::proto::rr::RecordType::A,
             action: QueryLogAction::Local,
             source_id: None,
             upstream: None,
             latency_ms: 10,
             ttl_remaining: None,
         };
-        assert_eq!(entry.client_ip, "127.0.0.1");
+        assert_eq!(entry.client_ip.to_string(), "127.0.0.1");
         assert_eq!(entry.action, QueryLogAction::Local);
     }
 }

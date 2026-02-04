@@ -39,7 +39,7 @@ impl QueryLogSink for ConsoleLogSink {
                     target: "dns_query",
                     client = %entry.client_ip,
                     domain = %entry.domain,
-                    type = %entry.query_type,
+                    r#type = %entry.query_type,
                     action = ?entry.action,
                     src_id = ?entry.source_id,
                     src_name = ?src_name,

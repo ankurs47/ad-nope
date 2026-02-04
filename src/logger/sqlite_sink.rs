@@ -89,12 +89,7 @@ fn run_sqlite_writer(
             .source_id
             .and_then(|id| blocklist_names.get(id as usize).map(|s| s.as_str()));
 
-        let client_ip_stripped =
-            if let Ok(socket_addr) = entry.client_ip.parse::<std::net::SocketAddr>() {
-                socket_addr.ip().to_string()
-            } else {
-                entry.client_ip.clone() // Fallback if parsing fails (e.g. already stripped or invalid)
-            };
+        let client_ip_stripped = entry.client_ip.to_string();
 
         // Insert
         let res = conn.execute(
@@ -106,7 +101,7 @@ fn run_sqlite_writer(
                 timestamp,
                 client_ip_stripped,
                 entry.domain,
-                entry.query_type,
+                entry.query_type.to_string(),
                 format!("{:?}", entry.action), // Enum to string
                 blocklist_name,
                 entry.upstream,

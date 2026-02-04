@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
     });
 
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
-    info!("Starting AdNope...");
+    info!("Starting ad-nope...");
 
     if !std::path::Path::new(&config_path).exists() {
         info!("Config file not found, using defaults.");

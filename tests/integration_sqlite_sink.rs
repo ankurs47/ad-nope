@@ -27,11 +27,11 @@ async fn test_sqlite_sink_logging() {
     let blocklist_names = vec!["test_list".to_string()];
     let logger = QueryLogger::new(config, blocklist_names);
 
-    // Send a log entry with a port
+    // Send a log entry (IpAddr type enforces no port)
     let entry = QueryLogEntry {
-        client_ip: "192.168.1.100:12345".to_string(), // Input has port
-        domain: "example.com".to_string(),
-        query_type: "A".to_string(),
+        client_ip: "192.168.1.100".parse().unwrap(),
+        domain: "example.com".into(),
+        query_type: hickory_server::proto::rr::RecordType::A,
         action: QueryLogAction::Forwarded,
         source_id: None,
         upstream: Some("8.8.8.8".to_string()),

@@ -7,12 +7,15 @@ use anyhow::Result;
 use arc_swap::ArcSwap;
 use hickory_server::authority::MessageResponseBuilder;
 use hickory_server::proto::op::ResponseCode;
+use hickory_server::proto::rr::Name;
 use hickory_server::proto::rr::{
     rdata::{A, AAAA},
     RData, Record, RecordType,
 };
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
 use moka::future::Cache;
+use rustc_hash::FxHashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -33,7 +36,9 @@ pub struct DnsHandler {
     resolver: Arc<dyn DnsResolver>,
     // Cache: Key(Name, Type) -> (Records, ValidUntil, StaleUntil)
     #[allow(clippy::type_complexity)]
-    cache: Cache<(Arc<str>, RecordType), (Vec<Record>, Instant, Instant)>,
+    cache: Cache<(Arc<str>, RecordType), (Arc<Vec<Record>>, Instant, Instant)>,
+    // Pre-calculated local records
+    local_records: Arc<FxHashMap<String, Arc<Vec<Record>>>>,
 }
 
 impl DnsHandler {
@@ -46,6 +51,43 @@ impl DnsHandler {
     ) -> Self {
         let cache = Cache::builder().max_capacity(config.cache.capacity).build();
 
+        // Pre-calculate local records
+        let mut local_map = FxHashMap::default();
+        for (domain, ip) in &config.local_records {
+            let mut records = Vec::new();
+            if let Ok(name) = Name::from_str(domain) {
+                match ip {
+                    std::net::IpAddr::V4(ipv4) => {
+                        let rdata = RData::A(A(*ipv4));
+                        let record = Record::from_rdata(name, 300, rdata);
+                        records.push(record);
+                    }
+                    std::net::IpAddr::V6(ipv6) => {
+                        let rdata = RData::AAAA(AAAA(*ipv6));
+                        let record = Record::from_rdata(name, 300, rdata);
+                        records.push(record);
+                    }
+                }
+            }
+            if !records.is_empty() {
+                local_map.insert(domain.clone(), Arc::new(records));
+            }
+        }
+
+        // Pre-calculate blocked records (templates)
+        // Note: The name will be replaced during query handling, so we use a placeholder here.
+        // Actually, for zero-copy we might just need the RData.
+        // But to reuse the existing structure, let's pre-build the RData.
+        // Wait, Record::from_rdata takes Name, which varies.
+        // So we can only pre-calculate the RData or use a dummy record and clone/modify?
+        // Modifying a Record is not zero-copy.
+        // Better strategy: Create the Record on the stack in serve_blocked using pre-made RData.
+        // But for strict "Arc<Vec<Record>>" consistency, let's keep it simple for now and just
+        // store the RData or standard empty loopback records.
+        // Actually, let's stick to the plan: "Stack Allocation in serve_blocked".
+        // So we don't strictly need these fields, but maybe pre-parsing the IP is good.
+        // Let's just store the RData for 0.0.0.0 and ::
+
         Self {
             config,
             stats,
@@ -53,6 +95,7 @@ impl DnsHandler {
             blocklist: Arc::new(ArcSwap::new(Arc::new(blocklist))),
             resolver,
             cache,
+            local_records: Arc::new(local_map),
         }
     }
 
@@ -60,8 +103,10 @@ impl DnsHandler {
         &self,
         name: &str,
         qtype: RecordType,
-    ) -> Result<(Vec<Record>, String)> {
+    ) -> Result<(Arc<Vec<Record>>, String)> {
         let (records, upstream) = self.resolver.resolve(name, qtype).await?;
+        let records = Arc::new(records);
+
         if !records.is_empty() {
             let min_ttl = records.iter().map(|r| r.ttl()).min().unwrap_or(300);
             let valid_until = Instant::now() + Duration::from_secs(min_ttl as u64);
@@ -107,7 +152,7 @@ impl DnsHandler {
         &self,
         name: Arc<str>,
         qtype: RecordType,
-    ) -> Option<(Vec<Record>, bool, Option<u64>)> {
+    ) -> Option<(Arc<Vec<Record>>, bool, Option<u64>)> {
         if let Some((records, valid_until, stale_until)) = self.cache.get(&(name, qtype)).await {
             let now = Instant::now();
             let ttl = if valid_until > now {
@@ -125,14 +170,17 @@ impl DnsHandler {
         None
     }
 
-    async fn serve_records<R: ResponseHandler>(
+    async fn serve_records<R: ResponseHandler, F>(
         &self,
         request: &Request,
         mut response_handle: R,
-        records: Vec<Record>,
+        records: &[Record], // CHANGED: Accept slice
         query: QueryContext,
-        log: LogContext,
-    ) -> ResponseInfo {
+        log_factory: F,
+    ) -> ResponseInfo
+    where
+        F: FnOnce() -> LogContext + Send,
+    {
         let mut header = hickory_server::proto::op::Header::response_from_request(request.header());
         header.set_authoritative(false);
         let builder = MessageResponseBuilder::from_message_request(request);
@@ -142,18 +190,21 @@ impl DnsHandler {
             .await
             .expect("Failed to send response");
 
-        self.logger
-            .log(QueryLogEntry {
-                client_ip: request.src().to_string(),
-                domain: query.name.to_string(),
-                query_type: query.qtype.to_string(),
-                action: log.action,
-                source_id: log.source_id,
-                upstream: log.upstream,
-                latency_ms: query.start.elapsed().as_millis() as u64,
-                ttl_remaining: log.ttl_remaining,
-            })
-            .await;
+        if self.config.logging.enable {
+            let log = log_factory();
+            self.logger
+                .log(QueryLogEntry {
+                    client_ip: request.src().ip(),
+                    domain: query.name.clone(),
+                    query_type: query.qtype,
+                    action: log.action,
+                    source_id: log.source_id,
+                    upstream: log.upstream.map(|s| s.into_owned()),
+                    latency_ms: query.start.elapsed().as_millis() as u64,
+                    ttl_remaining: log.ttl_remaining,
+                })
+                .await;
+        }
 
         info
     }
@@ -167,22 +218,36 @@ impl DnsHandler {
     ) -> ResponseInfo {
         self.stats.inc_blocked_by_source(source_id);
 
-        let mut records = Vec::new();
-        match query.qtype {
+        let record_opt = match query.qtype {
             RecordType::A => {
                 let rdata = RData::A("0.0.0.0".parse().unwrap());
-                let record = Record::from_rdata(request.queries()[0].name().into(), 60, rdata);
-                records.push(record);
+                Some(Record::from_rdata(
+                    Name::from_str(&query.name).unwrap_or_default(),
+                    60,
+                    rdata,
+                ))
             }
             RecordType::AAAA => {
                 let rdata = RData::AAAA("::".parse().unwrap());
-                let record = Record::from_rdata(request.queries()[0].name().into(), 60, rdata);
-                records.push(record);
+                Some(Record::from_rdata(
+                    Name::from_str(&query.name).unwrap_or_default(),
+                    60,
+                    rdata,
+                ))
             }
-            _ => {}
-        }
+            _ => None,
+        };
 
-        if records.is_empty() {
+        if let Some(record) = record_opt {
+            let records = std::slice::from_ref(&record);
+            self.serve_records(request, response_handle, records, query, || LogContext {
+                action: QueryLogAction::Blocked,
+                source_id: Some(source_id),
+                upstream: None,
+                ttl_remaining: None,
+            })
+            .await
+        } else {
             let mut header =
                 hickory_server::proto::op::Header::response_from_request(request.header());
             header.set_authoritative(false);
@@ -194,34 +259,22 @@ impl DnsHandler {
                 .await
                 .expect("Failed to send response");
 
-            self.logger
-                .log(QueryLogEntry {
-                    client_ip: request.src().to_string(),
-                    domain: query.name.to_string(),
-                    query_type: query.qtype.to_string(),
-                    action: QueryLogAction::Blocked,
-                    source_id: Some(source_id),
-                    upstream: None,
-                    latency_ms: query.start.elapsed().as_millis() as u64,
-                    ttl_remaining: None,
-                })
-                .await;
-            return info;
+            if self.config.logging.enable {
+                self.logger
+                    .log(QueryLogEntry {
+                        client_ip: request.src().ip(),
+                        domain: query.name.clone(),
+                        query_type: query.qtype,
+                        action: QueryLogAction::Blocked,
+                        source_id: Some(source_id),
+                        upstream: None,
+                        latency_ms: query.start.elapsed().as_millis() as u64,
+                        ttl_remaining: None,
+                    })
+                    .await;
+            }
+            info
         }
-
-        self.serve_records(
-            request,
-            response_handle,
-            records,
-            query,
-            LogContext {
-                action: QueryLogAction::Blocked,
-                source_id: Some(source_id),
-                upstream: None,
-                ttl_remaining: None,
-            },
-        )
-        .await
     }
     async fn handle_local_records<R: ResponseHandler>(
         &self,
@@ -229,39 +282,29 @@ impl DnsHandler {
         response_handle: R,
         query: &QueryContext,
     ) -> Result<ResponseInfo, R> {
-        if let Some(&ip_addr) = self.config.local_records.get(&*query.name) {
-            let mut records = Vec::new();
-            // IP is already parsed in config
-            match (query.qtype, ip_addr) {
-                (RecordType::A, std::net::IpAddr::V4(ipv4)) => {
-                    let rdata = RData::A(A(ipv4));
-                    let record = Record::from_rdata(request.queries()[0].name().into(), 300, rdata);
-                    records.push(record);
-                }
-                (RecordType::AAAA, std::net::IpAddr::V6(ipv6)) => {
-                    let rdata = RData::AAAA(AAAA(ipv6));
-                    let record = Record::from_rdata(request.queries()[0].name().into(), 300, rdata);
-                    records.push(record);
-                }
-                _ => {
-                    // Mismatch type
-                }
-            }
+        if let Some(records) = self.local_records.get(&*query.name) {
+            // Optimization: Check if record type matches.
+            // We iterate to find matching records (handling potentially multiple records if config supported it, though currently 1)
+            // But since we pre-calc per unique domain key in this simple implementation:
 
-            Ok(self
-                .serve_records(
-                    request,
-                    response_handle,
-                    records,
-                    query.clone(),
-                    LogContext {
-                        action: QueryLogAction::Local,
-                        source_id: None,
-                        upstream: Some("local-config".to_string()),
-                        ttl_remaining: None,
-                    },
-                )
-                .await)
+            if !records.is_empty() && records[0].record_type() == query.qtype {
+                Ok(self
+                    .serve_records(
+                        request,
+                        response_handle,
+                        records, // Pass slice
+                        query.clone(),
+                        || LogContext {
+                            action: QueryLogAction::Local,
+                            source_id: None,
+                            upstream: Some(std::borrow::Cow::Borrowed("local-config")),
+                            ttl_remaining: None,
+                        },
+                    )
+                    .await)
+            } else {
+                Err(response_handle)
+            }
         } else {
             Err(response_handle)
         }
@@ -311,9 +354,9 @@ impl DnsHandler {
                 .serve_records(
                     request,
                     response_handle,
-                    records,
+                    &records, // Pass slice
                     query.clone(),
-                    LogContext {
+                    || LogContext {
                         action: QueryLogAction::Cached,
                         source_id: None,
                         upstream: None,
@@ -338,12 +381,12 @@ impl DnsHandler {
                 self.serve_records(
                     request,
                     response_handle,
-                    records,
+                    &records, // Pass slice
                     query,
-                    LogContext {
+                    move || LogContext {
                         action: QueryLogAction::Forwarded,
                         source_id: None,
-                        upstream: Some(upstream_name),
+                        upstream: Some(std::borrow::Cow::Owned(upstream_name)),
                         ttl_remaining: None,
                     },
                 )
@@ -363,18 +406,20 @@ impl DnsHandler {
                     .await
                     .expect("Failed to send response");
 
-                self.logger
-                    .log(QueryLogEntry {
-                        client_ip: request.src().to_string(),
-                        domain: query.name.to_string(),
-                        query_type: query.qtype.to_string(),
-                        action: QueryLogAction::Forwarded,
-                        source_id: None,
-                        upstream: Some(format!("error: {}", e)),
-                        latency_ms: query.start.elapsed().as_millis() as u64,
-                        ttl_remaining: None,
-                    })
-                    .await;
+                if self.config.logging.enable {
+                    self.logger
+                        .log(QueryLogEntry {
+                            client_ip: request.src().ip(),
+                            domain: query.name.clone(),
+                            query_type: query.qtype,
+                            action: QueryLogAction::Forwarded,
+                            source_id: None,
+                            upstream: Some(format!("error: {}", e)),
+                            latency_ms: query.start.elapsed().as_millis() as u64,
+                            ttl_remaining: None,
+                        })
+                        .await;
+                }
 
                 info
             }

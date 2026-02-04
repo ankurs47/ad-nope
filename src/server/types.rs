@@ -10,9 +10,11 @@ pub struct QueryContext {
     pub start: Instant,
 }
 
+use std::borrow::Cow;
+
 pub struct LogContext {
     pub action: QueryLogAction,
     pub source_id: Option<u8>,
-    pub upstream: Option<String>,
+    pub upstream: Option<Cow<'static, str>>,
     pub ttl_remaining: Option<u64>,
 }

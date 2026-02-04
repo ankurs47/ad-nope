@@ -21,9 +21,9 @@ async fn test_logging_config_instantiation() {
 
     logger
         .log(QueryLogEntry {
-            client_ip: "1.2.3.4".to_string(),
-            domain: "test.com".to_string(),
-            query_type: "A".to_string(),
+            client_ip: "1.2.3.4".parse().unwrap(),
+            domain: "test.com".into(),
+            query_type: hickory_server::proto::rr::RecordType::A,
             action: QueryLogAction::Local,
             source_id: None,
             upstream: None,
