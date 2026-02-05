@@ -1,7 +1,5 @@
 use crate::config::Config;
 use crate::engine::AppState as EngineState;
-use crate::logger::QueryLogEntry;
-use crate::stats::StatsCollector;
 use axum::{
     extract::{Json as AxumJson, State},
     http::{header, StatusCode, Uri},
@@ -10,36 +8,37 @@ use axum::{
     Json, Router,
 };
 use rust_embed::RustEmbed;
-use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
+pub use source::ApiDataSource;
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
+
+pub mod memory;
+pub mod source;
+pub mod sqlite;
 
 #[derive(RustEmbed)]
 #[folder = "$OUT_DIR/ui"]
 struct Asset;
 
 struct ApiState {
-    stats: Arc<StatsCollector>,
+    data_source: Arc<dyn ApiDataSource>,
     engine: EngineState,
     config: Config,
     refresh_sender: Sender<()>,
-    logs_buffer: Arc<RwLock<VecDeque<QueryLogEntry>>>,
 }
 
 pub async fn start_api_server(
-    stats: Arc<StatsCollector>,
+    data_source: Arc<dyn ApiDataSource>,
     engine: EngineState,
     config: Config,
     refresh_sender: Sender<()>,
-    logs_buffer: Arc<RwLock<VecDeque<QueryLogEntry>>>,
     port: u16,
 ) {
     let state = Arc::new(ApiState {
-        stats,
+        data_source,
         engine,
         config,
         refresh_sender,
-        logs_buffer,
     });
 
     let app = Router::new()
@@ -61,7 +60,7 @@ pub async fn start_api_server(
 }
 
 async fn get_stats(State(state): State<Arc<ApiState>>) -> impl IntoResponse {
-    Json(state.stats.get_snapshot())
+    Json(state.data_source.get_stats().await)
 }
 
 async fn get_config(State(state): State<Arc<ApiState>>) -> impl IntoResponse {
@@ -74,9 +73,8 @@ async fn trigger_refresh(State(state): State<Arc<ApiState>>) -> impl IntoRespons
 }
 
 async fn get_logs(State(state): State<Arc<ApiState>>) -> impl IntoResponse {
-    let buffer = state.logs_buffer.read().unwrap();
-    // Return recent logs, reversed so newest first
-    let logs: Vec<QueryLogEntry> = buffer.iter().rev().cloned().collect();
+    // Limit to 100 logs for now
+    let logs = state.data_source.get_logs(100).await;
     Json(logs)
 }
 

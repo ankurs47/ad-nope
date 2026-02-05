@@ -7,6 +7,7 @@ use tokio::signal;
 use tracing::info;
 
 use ad_nope::config::Config;
+use ad_nope::db::DbClient;
 use ad_nope::engine::{AppState, BlocklistManager, StandardManager};
 use ad_nope::logger::QueryLogger;
 use ad_nope::server::DnsHandler;
@@ -60,15 +61,69 @@ async fn main() -> Result<()> {
         upstream_names,
         blocklist_names.clone(),
     );
-    // 3a. Init Memory Logger
-    let memory_sink = ad_nope::logger::MemoryLogSink::new(100); // Keep last 100 queries
-    let memory_buffer = memory_sink.clone_buffer();
 
-    // 3b. Init QueryLogger with MemorySink
+    // 3a. Init Shared DbClient if needed
+    let use_sqlite_sink = config
+        .logging
+        .query_log_sinks
+        .contains(&"sqlite".to_string());
+    // In this unified model, if use_sqlite_sink is true, we need DbClient.
+    // Also, if we want to allow the API to view historical data even if sink is disabled (not typical but possible if DB exists),
+    // we could check file existence.
+    // For now, let's stick to: if "sqlite" sink is enabled OR database file exists?
+    // User request: "can we creat one db client and share it with both query sink and data source"
+    // So distinct path for "sqlite" sink enabled.
+
+    let mut db_client: Option<Arc<DbClient>> = None;
+
+    if use_sqlite_sink {
+        info!("SQLite sink enabled. Initializing shared DbClient.");
+        let client = Arc::new(DbClient::new(config.logging.sqlite_path.clone()));
+        // Initialize schema immediately (safe to do here)
+        if let Err(e) = client.initialize() {
+            tracing::error!("Failed to initialize SQLite database: {}", e);
+            // Non-fatal? Maybe. logging will fail later.
+        } else {
+            db_client = Some(client);
+        }
+    }
+
+    // 3b. Init DataSource & Optional Memory Sink
+    let (memory_sink, data_source): (
+        Option<Box<dyn ad_nope::logger::QueryLogSink>>,
+        Arc<dyn ad_nope::api::ApiDataSource>,
+    ) = if let Some(client) = db_client.clone() {
+        // If DbClient is available (because sink is enabled), use it for API too.
+        // This implies persistent stats.
+        info!("Using SqliteDataSource for API.");
+        (
+            None, // Memory sink disabled to save RAM since we have SQLite
+            Arc::new(ad_nope::api::sqlite::SqliteDataSource::new(client)),
+        )
+    } else {
+        info!("SQLite sink disabled. Using MemoryDataSource for API.");
+        let sink = ad_nope::logger::MemoryLogSink::new(100);
+        let buffer = sink.clone_buffer();
+        (
+            Some(Box::new(sink)),
+            Arc::new(ad_nope::api::memory::MemoryDataSource::new(
+                stats.clone(),
+                buffer,
+            )),
+        )
+    };
+
+    // 3c. Init QueryLogger
+    let mut extra_sinks = Vec::new();
+    if let Some(sink) = memory_sink {
+        extra_sinks.push(sink);
+    }
+
     let logger = QueryLogger::new(
         config.logging.clone(),
         blocklist_names,
-        vec![Box::new(memory_sink)],
+        extra_sinks,
+        db_client.clone(), // Pass the shared client (Option<Arc<DbClient>>)
     );
 
     // 4. Init Blocklist Manager & Fetch Initial Lists
@@ -121,22 +176,13 @@ async fn main() -> Result<()> {
     });
 
     // 8. Start API Server (Embedded UI)
-    let api_stats = stats.clone();
     let api_state = app_state.clone();
     let api_config = config.clone();
     let api_refresh_tx = refresh_tx.clone();
-    let api_memory_buffer = memory_buffer;
 
     tokio::spawn(async move {
-        ad_nope::api::start_api_server(
-            api_stats,
-            api_state,
-            api_config,
-            api_refresh_tx,
-            api_memory_buffer,
-            8080,
-        )
-        .await;
+        ad_nope::api::start_api_server(data_source, api_state, api_config, api_refresh_tx, 8080)
+            .await;
     });
 
     // 9. Start Server

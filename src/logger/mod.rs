@@ -9,8 +9,10 @@ pub use sqlite_sink::SqliteLogSink;
 pub use types::{QueryLogAction, QueryLogEntry, QueryLogSink};
 
 use crate::config::LoggingConfig;
+use crate::db::DbClient;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tracing::error;
 
 pub struct QueryLogger {
     sinks: Vec<mpsc::Sender<QueryLogEntry>>,
@@ -21,6 +23,7 @@ impl QueryLogger {
         config: LoggingConfig,
         blocklist_names: Vec<String>,
         extra_sinks: Vec<Box<dyn QueryLogSink>>,
+        db_client: Option<Arc<DbClient>>,
     ) -> Arc<Self> {
         let mut sinks = Vec::new();
 
@@ -38,16 +41,21 @@ impl QueryLogger {
                 });
                 sinks.push(tx);
             } else if sink_type == "sqlite" {
-                let (tx, mut rx) = mpsc::channel(1000);
-                let sqlite_sink = SqliteLogSink::new(config.clone(), blocklist_names.clone());
-                let sink = Box::new(sqlite_sink);
+                if let Some(db) = db_client.clone() {
+                    let (tx, mut rx) = mpsc::channel(1000);
+                    let sqlite_sink =
+                        SqliteLogSink::new(db, config.clone(), blocklist_names.clone());
+                    let sink = Box::new(sqlite_sink);
 
-                tokio::spawn(async move {
-                    while let Some(entry) = rx.recv().await {
-                        sink.log(&entry);
-                    }
-                });
-                sinks.push(tx);
+                    tokio::spawn(async move {
+                        while let Some(entry) = rx.recv().await {
+                            sink.log(&entry);
+                        }
+                    });
+                    sinks.push(tx);
+                } else {
+                    error!("SQLite sink configured but no DbClient provided.");
+                }
             } else {
                 eprintln!("Unknown log sink type: {}", sink_type);
             }

@@ -35,6 +35,8 @@ pub struct StatsCollector {
     upstream_names: Vec<String>,
     blocklist_names: Vec<String>,
 
+    started_at: time::Instant,
+
     log_interval: Duration,
 }
 
@@ -57,6 +59,7 @@ impl StatsCollector {
             upstream_count: [0; 16].map(|_| AtomicU64::new(0)),
             upstream_names,
             blocklist_names,
+            started_at: time::Instant::now(),
             log_interval: Duration::from_secs(log_interval_sec),
         });
 
@@ -199,6 +202,15 @@ impl StatsCollector {
             top_blocked_clients: self.get_top_k(&self.client_blocks, 5),
             top_domains: self.get_top_k(&self.domain_queries, 5),
             top_blocked_domains: self.get_top_k(&self.domain_blocks, 5),
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - self.started_at.elapsed().as_secs(),
+            updated_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
         }
     }
 }
@@ -212,4 +224,6 @@ pub struct StatsSnapshot {
     pub top_blocked_clients: Vec<TopItem>,
     pub top_domains: Vec<TopItem>,
     pub top_blocked_domains: Vec<TopItem>,
+    pub started_at: u64,
+    pub updated_at: u64,
 }

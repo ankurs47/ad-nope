@@ -82,6 +82,17 @@
 
         <!-- Tab: Stats (Dashboard) -->
         <div x-show="currentTab === 'stats'" x-transition.opacity>
+            <div x-show="stats.started_at > 0" class="mb-6 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow-sm w-fit border border-gray-100 dark:border-gray-700">
+                <svg class="h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>
+                    Statistics collected since <span class="font-medium text-gray-700 dark:text-gray-300" x-text="formatDate(stats.started_at)"></span>
+                    <span class="text-xs text-gray-400 dark:text-gray-500 mx-1">•</span>
+                    Duration: <span class="font-medium text-gray-700 dark:text-gray-300" x-text="formatDuration(stats.updated_at - stats.started_at)"></span>
+                </span>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <!-- Stat Cards -->
                 <div
@@ -644,6 +655,24 @@
                     const m = Math.floor(seconds / 60);
                     const s = seconds % 60;
                     return `${m}m ${s}s`;
+                },
+
+                formatDate(timestamp) {
+                    if (!timestamp) return '-';
+                    return new Date(timestamp * 1000).toLocaleString();
+                },
+
+                formatDuration(seconds) {
+                    if (!seconds && seconds !== 0) return '-';
+                    const d = Math.floor(seconds / (3600 * 24));
+                    const h = Math.floor((seconds % (3600 * 24)) / 3600);
+                    const m = Math.floor((seconds % 3600) / 60);
+                    
+                    let parts = [];
+                    if (d > 0) parts.push(`${d}d`);
+                    if (h > 0) parts.push(`${h}h`);
+                    parts.push(`${m}m`);
+                    return parts.join(' ');
                 },
 
                 calculatePercentage(part, total) {
