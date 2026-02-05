@@ -24,8 +24,14 @@ async fn test_sqlite_sink_logging() {
         sqlite_retention_hours: 24,
     };
 
-    let _blocklist_names = vec!["test_list".to_string()];
-    let logger = QueryLogger::new(config, vec![], vec![]);
+    use ad_nope::db::DbClient;
+    use std::sync::Arc;
+
+    // Initialize DbClient (which handles schema)
+    let db_client = Arc::new(DbClient::new(db_path.to_string()));
+    db_client.initialize().unwrap();
+
+    let logger = QueryLogger::new(config, vec![], vec![], Some(db_client));
 
     // Send a log entry (IpAddr type enforces no port)
     let entry = QueryLogEntry {

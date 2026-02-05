@@ -10,7 +10,7 @@ async fn test_component_instantiation() {
     let config = Config::default();
     let _stats = StatsCollector::new(10, vec![], vec![]);
     // Logger
-    let _logger = QueryLogger::new(config.logging.clone(), vec![], vec![]);
+    let _logger = QueryLogger::new(config.logging.clone(), vec![], vec![], None);
 
     // Components
     // We can't easily test DnsHandler without mocks, but we verified it compiles.

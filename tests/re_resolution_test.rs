@@ -48,7 +48,7 @@ async fn test_background_re_resolution() {
     config.cache.min_ttl = 0; // Allow short TTL for testing
 
     let stats = StatsCollector::new(10, vec![], vec![]);
-    let logger = QueryLogger::new(config.logging.clone(), vec![], vec![]);
+    let logger = QueryLogger::new(config.logging.clone(), vec![], vec![], None);
     let call_count = Arc::new(AtomicUsize::new(0));
     let resolver = Arc::new(MockResolver {
         call_count: call_count.clone(),

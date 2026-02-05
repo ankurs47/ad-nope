@@ -1,3 +1,9 @@
+//! Statistics collection module.
+//!
+//! This module handles the collection of high-performance metrics for the DNS server.
+//! It uses atomic counters for global stats and sharded `DashMap`s for high-concurrency
+//! per-client and per-domain tracking.
+
 use dashmap::DashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -5,31 +11,46 @@ use std::sync::Arc;
 use tokio::time::{self, Duration};
 use tracing::info;
 
+/// Represents a single item in a "Top K" list (e.g., Top Client, Top Domain).
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct TopItem {
+    /// The name of the item (IP address or Domain).
     pub name: String,
+    /// The number of hits/queries.
     pub count: u64,
 }
 
+/// Central statistics collector.
+///
+/// This struct is thread-safe and designed to be shared across multiple Tokio tasks.
+/// It uses `std::sync::atomic` for simple counters and `DashMap` for concurrent maps.
 #[derive(Debug)]
 pub struct StatsCollector {
-    // Basic Counters
+    // --- Global Counters ---
     total_queries: AtomicU64,
     blocked_queries: AtomicU64,
     cache_hits: AtomicU64,
 
-    // Granular Stats (High Concurrency with DashMap)
+    // --- Granular Stats (High Concurrency with DashMap) ---
+    /// Map of Client IP -> Query Count.
     // Key: IpAddr (Copy, no allocation)
     client_queries: DashMap<IpAddr, u64>,
+
+    /// Map of Client IP -> Block Count.
     client_blocks: DashMap<IpAddr, u64>,
+
+    /// Map of Domain -> Query Count.
     // Key: Arc<str> (Cheap clone, shares with QueryContext)
     domain_queries: DashMap<Arc<str>, u64>,
+
+    /// Map of Domain -> Block Count.
     domain_blocks: DashMap<Arc<str>, u64>,
 
-    // Max 256 sources (u8 key).
-    blocks_by_source: [AtomicU64; 256],
+    // --- Source Tracking ---
+    /// Counters for blocked queries per source ID (0-255).
+    blocked_queries_by_source_id: [AtomicU64; 256],
 
-    // Upstream Latency Tracking
+    // --- Upstream Latency Tracking ---
     upstream_total_ms: [AtomicU64; 16],
     upstream_count: [AtomicU64; 16],
     upstream_names: Vec<String>,
@@ -41,6 +62,7 @@ pub struct StatsCollector {
 }
 
 impl StatsCollector {
+    /// Creates a new `StatsCollector` and starts a background logging task.
     pub fn new(
         log_interval_sec: u64,
         upstream_names: Vec<String>,
@@ -54,7 +76,7 @@ impl StatsCollector {
             client_blocks: DashMap::new(),
             domain_queries: DashMap::new(),
             domain_blocks: DashMap::new(),
-            blocks_by_source: [0; 256].map(|_| AtomicU64::new(0)),
+            blocked_queries_by_source_id: [0; 256].map(|_| AtomicU64::new(0)),
             upstream_total_ms: [0; 16].map(|_| AtomicU64::new(0)),
             upstream_count: [0; 16].map(|_| AtomicU64::new(0)),
             upstream_names,
@@ -63,7 +85,7 @@ impl StatsCollector {
             log_interval: Duration::from_secs(log_interval_sec),
         });
 
-        // Spawn background dumper
+        // Spawn background dumper to log stats periodically
         let stats_clone = stats.clone();
         tokio::spawn(async move {
             stats_clone.run_logger().await;
@@ -72,39 +94,50 @@ impl StatsCollector {
         stats
     }
 
+    /// Increments the total query counter.
     pub fn inc_queries(&self) {
         self.total_queries.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Increments the total blocked query counter.
     pub fn inc_blocked(&self) {
         self.blocked_queries.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Increments the cache hit counter.
     pub fn inc_cache_hit(&self) {
         self.cache_hits.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Increments the blocked counter for a specific source blocklist.
     pub fn inc_blocked_by_source(&self, source_id: u8) {
         self.inc_blocked();
-        self.blocks_by_source[source_id as usize].fetch_add(1, Ordering::Relaxed);
+        self.blocked_queries_by_source_id
+            .get(source_id as usize)
+            .map(|c| c.fetch_add(1, Ordering::Relaxed));
     }
 
+    /// Records a query from a specific client IP.
     pub fn inc_client_query(&self, client: IpAddr) {
         *self.client_queries.entry(client).or_insert(0) += 1;
     }
 
+    /// Records a blocked query for a specific client IP.
     pub fn inc_client_block(&self, client: IpAddr) {
         *self.client_blocks.entry(client).or_insert(0) += 1;
     }
 
+    /// Records a query for a specific domain.
     pub fn inc_domain_query(&self, domain: Arc<str>) {
         *self.domain_queries.entry(domain).or_insert(0) += 1;
     }
 
+    /// Records a blocked query for a specific domain.
     pub fn inc_domain_block(&self, domain: Arc<str>) {
         *self.domain_blocks.entry(domain).or_insert(0) += 1;
     }
 
+    /// Records the latency for an upstream query.
     pub fn record_upstream_latency(&self, upstream_idx: usize, ms: u64) {
         if upstream_idx < 16 {
             self.upstream_total_ms[upstream_idx].fetch_add(ms, Ordering::Relaxed);
@@ -145,7 +178,7 @@ impl StatsCollector {
         if blocked > 0 {
             block_stats.push_str(" BlockStats: ");
             for i in 0..256 {
-                let count = self.blocks_by_source[i].load(Ordering::Relaxed);
+                let count = self.blocked_queries_by_source_id[i].load(Ordering::Relaxed);
                 if count > 0 {
                     let name = self
                         .blocklist_names
@@ -193,6 +226,7 @@ impl StatsCollector {
         items.into_iter().take(k).collect()
     }
 
+    /// Captures a snapshot of the current statistics for the API.
     pub fn get_snapshot(&self) -> StatsSnapshot {
         StatsSnapshot {
             total_queries: self.total_queries.load(Ordering::Relaxed),
@@ -215,6 +249,7 @@ impl StatsCollector {
     }
 }
 
+/// A serialize-able snapshot of the system statistics.
 #[derive(serde::Serialize)]
 pub struct StatsSnapshot {
     pub total_queries: u64,
@@ -226,4 +261,62 @@ pub struct StatsSnapshot {
     pub top_blocked_domains: Vec<TopItem>,
     pub started_at: u64,
     pub updated_at: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_stats_counters() {
+        let stats = StatsCollector::new(10, vec![], vec![]);
+        stats.inc_queries();
+        stats.inc_queries();
+        stats.inc_blocked();
+        stats.inc_cache_hit();
+
+        let snapshot = stats.get_snapshot();
+        assert_eq!(snapshot.total_queries, 2);
+        assert_eq!(snapshot.blocked_queries, 1);
+        assert_eq!(snapshot.cache_hits, 1);
+    }
+
+    #[tokio::test]
+    async fn test_granular_stats() {
+        let stats = StatsCollector::new(10, vec![], vec![]);
+        let client_ip = "127.0.0.1".parse().unwrap();
+        let domain: Arc<str> = "example.com".into();
+
+        stats.inc_client_query(client_ip);
+        stats.inc_client_query(client_ip);
+        stats.inc_domain_query(domain.clone());
+        stats.inc_domain_block(domain.clone());
+
+        let snapshot = stats.get_snapshot();
+        assert!(!snapshot.top_clients.is_empty());
+        assert_eq!(snapshot.top_clients[0].name, "127.0.0.1");
+        assert_eq!(snapshot.top_clients[0].count, 2);
+
+        assert!(!snapshot.top_domains.is_empty());
+        assert_eq!(snapshot.top_domains[0].name, "example.com");
+        assert_eq!(snapshot.top_domains[0].count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_source_tracking() {
+        let stats = StatsCollector::new(10, vec![], vec!["list1".to_string(), "list2".to_string()]);
+        stats.inc_blocked_by_source(0); // list1
+        stats.inc_blocked_by_source(1); // list2
+        stats.inc_blocked_by_source(1); // list2 again
+
+        assert_eq!(
+            stats.blocked_queries_by_source_id[0].load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            stats.blocked_queries_by_source_id[1].load(Ordering::Relaxed),
+            2
+        );
+        assert_eq!(stats.blocked_queries.load(Ordering::Relaxed), 3);
+    }
 }

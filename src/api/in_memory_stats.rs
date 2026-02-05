@@ -1,3 +1,9 @@
+//! In-memory implementation of the API data source.
+//!
+//! This data source is used when no persistent storage (SQLite) is configured.
+//! It serves real-time statistics directly from the `StatsCollector` and recent
+//! logs from a fixed-size ring buffer.
+
 use super::source::ApiDataSource;
 use crate::logger::types::QueryLogEntry;
 use crate::stats::{StatsCollector, StatsSnapshot};
@@ -5,12 +11,16 @@ use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
-pub struct MemoryDataSource {
+/// An API data source that reads from in-memory structures.
+pub struct InMemoryStatsSource {
+    /// Reference to the live statistics collector.
     stats: Arc<StatsCollector>,
+    /// Shared buffer containing the most recent query logs.
     logs_buffer: Arc<RwLock<VecDeque<QueryLogEntry>>>,
 }
 
-impl MemoryDataSource {
+impl InMemoryStatsSource {
+    /// Creates a new `InMemoryStatsSource`.
     pub fn new(
         stats: Arc<StatsCollector>,
         logs_buffer: Arc<RwLock<VecDeque<QueryLogEntry>>>,
@@ -20,7 +30,7 @@ impl MemoryDataSource {
 }
 
 #[async_trait]
-impl ApiDataSource for MemoryDataSource {
+impl ApiDataSource for InMemoryStatsSource {
     async fn get_stats(&self) -> StatsSnapshot {
         self.stats.get_snapshot()
     }

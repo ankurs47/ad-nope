@@ -1,3 +1,13 @@
+//! DNS Request Handler implementation.
+//!
+//! This module contains the core logic for handling incoming DNS requests.
+//! It orchestrates:
+//! 1. Query parsing
+//! 2. Local record lookup
+//! 3. Blocklist checking
+//! 4. Caching
+//! 5. Upstream resolution
+
 use crate::config::Config;
 use crate::engine::{AppState, BlocklistMatcher};
 use crate::logger::{QueryLogAction, QueryLogEntry, QueryLogger};
@@ -23,33 +33,42 @@ use tracing::{error, info};
 
 use super::types::{LogContext, QueryContext};
 
+/// Handles incoming DNS queries by coordinating checking, caching, and resolution.
 #[derive(Clone)]
 pub struct DnsHandler {
+    /// Application configuration.
     config: Config,
+    /// Metrics collector.
     stats: Arc<StatsCollector>,
+    /// Query logger.
     logger: Arc<QueryLogger>,
-    app_state: AppState, // Added AppState
-    // ...
+    /// Application state (e.g., pause status).
+    app_state: AppState,
+    /// Hot-swappable blocklist matcher.
     blocklist: Arc<ArcSwap<Arc<dyn BlocklistMatcher>>>,
+    /// Upstream resolver implementation.
     resolver: Arc<dyn DnsResolver>,
+    /// In-memory response cache.
     #[allow(clippy::type_complexity)]
     cache: Cache<(Arc<str>, RecordType), (Arc<Vec<Record>>, Instant, Instant)>,
+    /// Static local records loaded from config.
     local_records: Arc<FxHashMap<String, Arc<Vec<Record>>>>,
 }
 
 impl DnsHandler {
+    /// Creates a new `DnsHandler`.
     pub fn new(
         config: Config,
         stats: Arc<StatsCollector>,
         logger: Arc<QueryLogger>,
         blocklist: Arc<dyn BlocklistMatcher>,
         resolver: Arc<dyn DnsResolver>,
-        app_state: AppState, // Added AppState arg
+        app_state: AppState,
     ) -> Self {
-        // ... (cache creation)
         let cache = Cache::builder().max_capacity(config.cache.capacity).build();
 
-        // ... (local records pre-calc logic stays same)
+        // Pre-calculate local records for faster lookup
+        // Note: Currently supports A and AAAA records only
         let mut local_map = FxHashMap::default();
         let local_ttl = config.cache.min_ttl;
         for (domain, ip) in &config.local_records {
@@ -77,7 +96,7 @@ impl DnsHandler {
             config,
             stats,
             logger,
-            app_state, // Init field
+            app_state,
             blocklist: Arc::new(ArcSwap::new(Arc::new(blocklist))),
             resolver,
             cache,
@@ -85,6 +104,7 @@ impl DnsHandler {
         }
     }
 
+    /// Resolves a query using the upstream resolver and caches the result.
     async fn resolve_and_cache(
         &self,
         name: &str,
@@ -95,6 +115,7 @@ impl DnsHandler {
 
         if !records.is_empty() {
             // Find the minimum TTL among all records
+            #[allow(clippy::manual_map)]
             let record_min_ttl = records.iter().map(|r| r.ttl()).min().unwrap_or(300);
 
             // Enforce configured minimum TTL for caching purposes
@@ -113,12 +134,14 @@ impl DnsHandler {
         Ok((records, upstream))
     }
 
+    /// Atomically updates the active blocklist matcher.
     pub async fn update_blocklist(&self, new_blocklist: Arc<dyn BlocklistMatcher>) {
         info!("Updating active blocklist...");
         self.blocklist.store(Arc::new(new_blocklist));
         info!("Active blocklist updated.");
     }
 
+    /// Extracts query information from the incoming request.
     async fn get_query_info(&self, request: &Request) -> QueryContext {
         let query = request.queries().first().expect("No query in request");
         let name = query.name();
@@ -136,10 +159,14 @@ impl DnsHandler {
         }
     }
 
+    /// Checks if a domain is blocked.
     fn check_blocklist(&self, name: &str) -> Option<u8> {
         self.blocklist.load().check(name)
     }
 
+    /// Checks the cache for a response.
+    ///
+    /// Returns `Some((records, is_stale, ttl))` if found.
     async fn check_cache(
         &self,
         name: Arc<str>,
@@ -162,11 +189,12 @@ impl DnsHandler {
         None
     }
 
+    /// Sends DNS records to the client and logs the request.
     async fn serve_records<R: ResponseHandler, F>(
         &self,
         request: &Request,
         mut response_handle: R,
-        records: &[Record], // CHANGED: Accept slice
+        records: &[Record],
         query: QueryContext,
         log_factory: F,
     ) -> ResponseInfo
@@ -201,6 +229,7 @@ impl DnsHandler {
         info
     }
 
+    /// Handles a blocked request by returning 0.0.0.0, ::, or NXDOMAIN.
     async fn serve_blocked<R: ResponseHandler>(
         &self,
         request: &Request,
@@ -270,6 +299,7 @@ impl DnsHandler {
             info
         }
     }
+
     async fn handle_local_records<R: ResponseHandler>(
         &self,
         request: &Request,
@@ -277,10 +307,6 @@ impl DnsHandler {
         query: &QueryContext,
     ) -> Result<ResponseInfo, R> {
         if let Some(records) = self.local_records.get(&*query.name) {
-            // Optimization: Check if record type matches.
-            // We iterate to find matching records (handling potentially multiple records if config supported it, though currently 1)
-            // But since we pre-calc per unique domain key in this simple implementation:
-
             if !records.is_empty() && records[0].record_type() == query.qtype {
                 Ok(self
                     .serve_records(
@@ -378,18 +404,14 @@ impl DnsHandler {
         // 3. Resolve Upstream
         match self.resolve_and_cache(&query.name, query.qtype).await {
             Ok((records, upstream_name)) => {
-                self.serve_records(
-                    request,
-                    response_handle,
-                    &records, // Pass slice
-                    query,
-                    move || LogContext {
+                self.serve_records(request, response_handle, &records, query, move || {
+                    LogContext {
                         action: QueryLogAction::Forwarded,
                         source_id: None,
                         upstream: Some(std::borrow::Cow::Owned(upstream_name)),
                         ttl_remaining: None,
-                    },
-                )
+                    }
+                })
                 .await
             }
             Err(e) => {
@@ -440,6 +462,7 @@ impl RequestHandler for DnsHandler {
         let query_ctx = self.get_query_info(request).await;
         self.stats.inc_domain_query(query_ctx.name.clone());
 
+        // Step 1: Check Local Records
         let response_handle = match self
             .handle_local_records(request, response_handle, &query_ctx)
             .await
@@ -448,6 +471,7 @@ impl RequestHandler for DnsHandler {
             Err(handle) => handle,
         };
 
+        // Step 2: Check Blocklists (if blocking is active)
         let response_handle = match self
             .handle_blocked_request(request, response_handle, &query_ctx)
             .await
@@ -456,6 +480,7 @@ impl RequestHandler for DnsHandler {
             Err(handle) => handle,
         };
 
+        // Step 3: Check Cache
         let response_handle = match self
             .handle_cached_response(request, response_handle, &query_ctx)
             .await
@@ -464,6 +489,7 @@ impl RequestHandler for DnsHandler {
             Err(handle) => handle,
         };
 
+        // Step 4: Resolve Upstream
         self.resolve_and_serve(request, response_handle, query_ctx)
             .await
     }

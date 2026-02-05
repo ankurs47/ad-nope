@@ -1,4 +1,9 @@
-use super::matcher::HashedMatcher;
+//! Blocklist Manager implementation.
+//!
+//! This module handles the downloading, parsing, and aggregation of remote blocklists.
+//! It supports concurrent downloads and parses lists into a `HashedMatcher`.
+
+use super::domain_matcher::HashedMatcher;
 use super::traits::{BlocklistManager, BlocklistMatcher};
 use crate::config::Config;
 use futures::{stream, StreamExt};
@@ -9,12 +14,14 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_util::io::StreamReader;
 use tracing::{error, info};
 
+/// Standard manager for fetching blocklists over HTTP.
 pub struct StandardManager {
     config: Config,
     client: Client,
 }
 
 impl StandardManager {
+    /// Creates a new `StandardManager`.
     pub fn new(config: Config) -> Self {
         Self {
             config,
@@ -22,6 +29,9 @@ impl StandardManager {
         }
     }
 
+    /// Parses a single line from a blocklist file.
+    ///
+    /// Ignores comments and empty lines. Normalizes domains to lowercase.
     fn parse_line(line: &str) -> Option<Box<str>> {
         let line = line.trim();
         // Skip comments and empty lines

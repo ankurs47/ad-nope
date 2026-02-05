@@ -8,13 +8,16 @@ use axum::{
     Json, Router,
 };
 use rust_embed::RustEmbed;
-pub use source::ApiDataSource;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
-pub mod memory;
+pub mod db_stats_source;
+pub mod in_memory_stats;
 pub mod source;
-pub mod sqlite;
+
+pub use db_stats_source::PersistentStatsSource;
+pub use in_memory_stats::InMemoryStatsSource;
+pub use source::ApiDataSource;
 
 #[derive(RustEmbed)]
 #[folder = "$OUT_DIR/ui"]

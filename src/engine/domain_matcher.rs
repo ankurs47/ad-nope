@@ -1,7 +1,13 @@
+//! Domain matching logic.
+//!
+//! Provides high-performance domain matching against loaded blocklists using hashing.
+
 use super::traits::BlocklistMatcher;
 use rustc_hash::FxHashMap;
 
-/// Optimized in-memory matcher using FxHashMap<Box<str>, u8>
+/// Optimized in-memory matcher using `FxHashMap<Box<str>, u8>`.
+///
+/// It supports exact matches and suffix matches (e.g., matching `ads.example.com` against `example.com`).
 #[derive(Debug)]
 pub struct HashedMatcher {
     // Map domain -> source_id
@@ -10,6 +16,7 @@ pub struct HashedMatcher {
 }
 
 impl HashedMatcher {
+    /// Creates a new `HashedMatcher` from a map of domains and an allowlist.
     pub fn new(domains: FxHashMap<Box<str>, u8>, allowlist_vec: Vec<String>) -> Self {
         let mut allowlist = FxHashMap::default();
         for d in allowlist_vec {
@@ -20,6 +27,7 @@ impl HashedMatcher {
 }
 
 impl BlocklistMatcher for HashedMatcher {
+    /// Checks if a domain is blocked.
     fn check(&self, domain: &str) -> Option<u8> {
         // 1. Check Allowlist (Exact Match)
         if self.allowlist.contains_key(domain) {
@@ -27,6 +35,8 @@ impl BlocklistMatcher for HashedMatcher {
         }
 
         // 2. Iterative Suffix Match
+        // We match "example.com", then "com" (if applicable), but usually just subdomains.
+        // Actually, logic is: check "sub.example.com", then "example.com", then "com".
         let mut part = domain;
         loop {
             if let Some(&source_id) = self.domains.get(part) {
