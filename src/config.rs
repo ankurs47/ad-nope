@@ -42,6 +42,10 @@ pub struct Config {
     #[serde(default = "default_upstream_timeout_ms")]
     pub upstream_timeout_ms: u64,
 
+    /// Disable IPv6 (AAAA) record resolution.
+    #[serde(default = "default_disable_ipv6")]
+    pub disable_ipv6: bool,
+
     /// Bootstrap DNS servers used to resolve DoD (DNS-over-HTTPS/TLS) upstreams.
     #[serde(default = "default_bootstrap_dns")]
     pub bootstrap_dns: Vec<String>,
@@ -232,6 +236,9 @@ fn default_stats_enable() -> bool {
 fn default_log_interval() -> u64 {
     300
 }
+fn default_disable_ipv6() -> bool {
+    false
+}
 fn default_blocklists() -> HashMap<String, String> {
     let mut m = HashMap::new();
     m.insert(
@@ -256,6 +263,7 @@ impl Default for Config {
             upstream_servers: default_upstream_servers(),
             resolution_policy: default_resolution_policy(),
             upstream_timeout_ms: default_upstream_timeout_ms(),
+            disable_ipv6: default_disable_ipv6(),
             bootstrap_dns: default_bootstrap_dns(),
             blocklists: default_blocklists(),
             allowlist: vec![],

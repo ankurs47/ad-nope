@@ -1,6 +1,7 @@
 # Network Configuration
 host = "0.0.0.0"
 port = 5300      # Using 5300 for dev (requires sudo for 53)
+disable_ipv6 = false # Set to true to block all AAAA (IPv6) queries
 
 # Upstream DNS Servers
 # format: <protocol>://<ip_or_host>:<port>
@@ -64,7 +65,7 @@ format = "text"        # or "json"
 # Deprecated for query logging, but kept for compatibility.
 target = "console"
 # query_log_sinks is specific for DNS query logs
-query_log_sinks = ["console"]    # ["console", "file", "sqlite"]
+query_log_sinks = ["console", "sqlite"]    # ["console", "file", "sqlite"]
 level = "info"         # "error", "warn", "info", "debug", "trace"
 # file_path = "ad-nope.log"
 # syslog_addr = "127.0.0.1:514"

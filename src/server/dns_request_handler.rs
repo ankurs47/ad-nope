@@ -110,9 +110,16 @@ impl DnsHandler {
         name: &str,
         qtype: RecordType,
     ) -> Result<(Arc<Vec<Record>>, String)> {
-        let (records, upstream) = self.resolver.resolve(name, qtype).await?;
+        let (mut records, upstream) = self.resolver.resolve(name, qtype).await?;
+
+        // Filter IPv6 records if disabled
+        if self.config.disable_ipv6 {
+            records.retain(|r| r.record_type() != RecordType::AAAA);
+        }
+
         let records = Arc::new(records);
 
+        // Cache successful lookups (including empty "No Data" responses)
         if !records.is_empty() {
             // Find the minimum TTL among all records
             #[allow(clippy::manual_map)]
@@ -123,6 +130,19 @@ impl DnsHandler {
 
             let valid_until = Instant::now() + Duration::from_secs(effective_ttl as u64);
             let stale_until = valid_until + Duration::from_secs(self.config.cache.grace_period_sec);
+            self.cache
+                .insert(
+                    (Arc::from(name), qtype),
+                    (records.clone(), valid_until, stale_until),
+                )
+                .await;
+        } else {
+            // Negative Caching (No Data)
+            // Use min_ttl for negative verification to avoid spamming upstream
+            let effective_ttl = self.config.cache.min_ttl;
+            let valid_until = Instant::now() + Duration::from_secs(effective_ttl as u64);
+            let stale_until = valid_until + Duration::from_secs(self.config.cache.grace_period_sec);
+
             self.cache
                 .insert(
                     (Arc::from(name), qtype),
@@ -462,6 +482,25 @@ impl RequestHandler for DnsHandler {
         let query_ctx = self.get_query_info(request).await;
         self.stats.inc_domain_query(query_ctx.name.clone());
 
+        // Step 0: Check IPv6 Disabling
+        if self.config.disable_ipv6 && query_ctx.qtype == RecordType::AAAA {
+            // Return empty NOERROR (NODATA)
+            return self
+                .serve_records(
+                    request,
+                    response_handle,
+                    &[], // Empty records
+                    query_ctx,
+                    move || LogContext {
+                        action: QueryLogAction::Blocked, // Or Custom action? Using Blocked for now or maybe just Local/Filtered
+                        source_id: None,
+                        upstream: Some("ipv6-disabled".into()),
+                        ttl_remaining: None,
+                    },
+                )
+                .await;
+        }
+
         // Step 1: Check Local Records
         let response_handle = match self
             .handle_local_records(request, response_handle, &query_ctx)
@@ -492,5 +531,137 @@ impl RequestHandler for DnsHandler {
         // Step 4: Resolve Upstream
         self.resolve_and_serve(request, response_handle, query_ctx)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::engine::BlocklistMatcher;
+    use crate::logger::QueryLogger;
+    use crate::stats::StatsCollector;
+    use async_trait::async_trait;
+
+    struct MockResolver {
+        pub return_empty: bool,
+    }
+
+    #[async_trait]
+    impl DnsResolver for MockResolver {
+        async fn resolve(&self, _name: &str, qtype: RecordType) -> Result<(Vec<Record>, String)> {
+            if self.return_empty {
+                Ok((vec![], "mock-upstream".to_string()))
+            } else {
+                match qtype {
+                    RecordType::A => {
+                        let rdata = RData::A("1.2.3.4".parse().unwrap());
+                        let record =
+                            Record::from_rdata(Name::from_str("example.com.").unwrap(), 60, rdata);
+                        Ok((vec![record], "mock-upstream".to_string()))
+                    }
+                    RecordType::AAAA => {
+                        let rdata = RData::AAAA("::1".parse().unwrap());
+                        let record =
+                            Record::from_rdata(Name::from_str("example.com.").unwrap(), 60, rdata);
+                        Ok((vec![record], "mock-upstream".to_string()))
+                    }
+                    _ => Ok((vec![], "mock-upstream".to_string())),
+                }
+            }
+        }
+    }
+
+    struct MockBlocklist;
+    impl BlocklistMatcher for MockBlocklist {
+        fn check(&self, _domain: &str) -> Option<u8> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn test_negative_caching() {
+        let mut config = Config::default();
+        config.cache.min_ttl = 60;
+        config.cache.grace_period_sec = 10;
+
+        // Disable logging to avoid DB init
+        config.logging.enable = false;
+
+        let stats = StatsCollector::new(10, vec![], vec![]);
+        // Construct basic logger
+        let logger = QueryLogger::new(config.logging.clone(), vec![], vec![], None);
+        let blocklist = Arc::new(MockBlocklist);
+        let app_state = AppState::new();
+
+        // Resolver returns empty records
+        let resolver = Arc::new(MockResolver { return_empty: true });
+
+        let handler = DnsHandler::new(
+            config.clone(),
+            stats,
+            logger,
+            blocklist,
+            resolver,
+            app_state,
+        );
+
+        let name = "test.local";
+        let qtype = RecordType::AAAA;
+
+        // 1. Perform resolution (should cache empty result)
+        // resolve_and_cache returns (records, upstream)
+        let (records, _) = handler.resolve_and_cache(name, qtype).await.unwrap();
+        assert!(records.is_empty(), "First resolution should return empty");
+
+        // 2. Check cache immediateley
+        // check_cache returns Option<(records, is_stale, ttl)>
+        let cached = handler.check_cache(Arc::from(name), qtype).await;
+        assert!(
+            cached.is_some(),
+            "Result should be cached due to negative caching"
+        );
+
+        let (cached_records, is_stale, ttl) = cached.unwrap();
+        assert!(cached_records.is_empty(), "Cached records should be empty");
+        assert!(!is_stale, "Cache should not be stale yet");
+        assert!(ttl.unwrap() > 0, "TTL should be set");
+    }
+
+    #[tokio::test]
+    async fn test_disable_ipv6() {
+        let mut config = Config::default();
+        config.disable_ipv6 = true;
+        // Disable logging to avoid DB init
+        config.logging.enable = false;
+
+        let stats = StatsCollector::new(10, vec![], vec![]);
+        let logger = QueryLogger::new(config.logging.clone(), vec![], vec![], None);
+        let blocklist = Arc::new(MockBlocklist);
+        let app_state = AppState::new();
+        // Resolver that returns data (should be ignored)
+        let resolver = Arc::new(MockResolver {
+            return_empty: false,
+        });
+
+        let handler = DnsHandler::new(
+            config.clone(),
+            stats,
+            logger,
+            blocklist,
+            resolver,
+            app_state,
+        );
+
+        let name = "example.com";
+        let qtype = RecordType::AAAA;
+
+        // 1. Test resolve_and_cache (Response Filtering)
+        // Even though resolver returns data, handler should filter it
+        let (records, _) = handler.resolve_and_cache(name, qtype).await.unwrap();
+        assert!(
+            records.is_empty(),
+            "Previously AAAA records should be filtered out when disable_ipv6 is true"
+        );
     }
 }
