@@ -77,6 +77,10 @@ impl DbClient {
             "CREATE INDEX IF NOT EXISTS idx_logs_client_ip ON query_logs(client_ip)",
             [],
         )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_logs_action ON query_logs(action)",
+            [],
+        )?;
 
         info!("SQLite database initialized at {}", self.db_path);
         Ok(())
