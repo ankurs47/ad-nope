@@ -28,10 +28,15 @@ async fn test_sqlite_sink_logging() {
     use std::sync::Arc;
 
     // Initialize DbClient (which handles schema)
-    let db_client = Arc::new(DbClient::new(db_path.to_string()));
+    let db_client = Arc::new(DbClient::new(db_path.to_string()).unwrap());
     db_client.initialize().unwrap();
 
-    let logger = QueryLogger::new(config, vec![], vec![], Some(db_client));
+    let logger = QueryLogger::new(
+        config,
+        vec![],
+        vec![],
+        Some(db_client.create_log_writer().unwrap()),
+    );
 
     // Send a log entry (IpAddr type enforces no port)
     let entry = QueryLogEntry {

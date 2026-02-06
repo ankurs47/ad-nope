@@ -9,7 +9,7 @@ pub use sqlite_sink::SqliteLogSink;
 pub use types::{QueryLogAction, QueryLogEntry, QueryLogSink};
 
 use crate::config::LoggingConfig;
-use crate::db::DbClient;
+use crate::db::LogWriter;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::error;
@@ -23,7 +23,7 @@ impl QueryLogger {
         config: LoggingConfig,
         blocklist_names: Vec<String>,
         extra_sinks: Vec<Box<dyn QueryLogSink>>,
-        db_client: Option<Arc<DbClient>>,
+        mut log_writer: Option<LogWriter>,
     ) -> Arc<Self> {
         let mut sinks = Vec::new();
 
@@ -41,10 +41,10 @@ impl QueryLogger {
                 });
                 sinks.push(tx);
             } else if sink_type == "sqlite" {
-                if let Some(db) = db_client.clone() {
+                if let Some(writer) = log_writer.take() {
                     let (tx, mut rx) = mpsc::channel(1000);
                     let sqlite_sink =
-                        SqliteLogSink::new(db, config.clone(), blocklist_names.clone());
+                        SqliteLogSink::new(writer, config.clone(), blocklist_names.clone());
                     let sink = Box::new(sqlite_sink);
 
                     tokio::spawn(async move {
@@ -54,7 +54,9 @@ impl QueryLogger {
                     });
                     sinks.push(tx);
                 } else {
-                    error!("SQLite sink configured but no DbClient provided.");
+                    error!(
+                        "SQLite sink configured but no LogWriter provided (or already consumed)."
+                    );
                 }
             } else {
                 eprintln!("Unknown log sink type: {}", sink_type);

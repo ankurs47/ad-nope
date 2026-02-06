@@ -630,10 +630,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_disable_ipv6() {
-        let mut config = Config::default();
-        config.disable_ipv6 = true;
-        // Disable logging to avoid DB init
-        config.logging.enable = false;
+        let config = Config {
+            disable_ipv6: true,
+            logging: crate::config::LoggingConfig {
+                enable: false,
+                ..Default::default()
+            },
+            ..Config::default()
+        };
 
         let stats = StatsCollector::new(10, vec![], vec![]);
         let logger = QueryLogger::new(config.logging.clone(), vec![], vec![], None);

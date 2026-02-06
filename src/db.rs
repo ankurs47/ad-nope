@@ -8,21 +8,34 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, info};
 
+use std::sync::Mutex;
+
 pub struct DbClient {
     db_path: String,
+    conn: Mutex<Connection>,
+}
+
+pub struct LogWriter {
+    conn: Connection,
 }
 
 impl DbClient {
-    pub fn new(db_path: String) -> Self {
-        Self { db_path }
+    pub fn new(db_path: String) -> Result<Self> {
+        let conn = Connection::open(&db_path)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        Ok(Self {
+            db_path,
+            conn: Mutex::new(conn),
+        })
     }
 
-    fn get_connection(&self) -> Result<Connection> {
-        Connection::open(&self.db_path)
+    pub fn create_log_writer(&self) -> Result<LogWriter> {
+        LogWriter::new(&self.db_path)
     }
 
     pub fn initialize(&self) -> Result<()> {
-        let conn = self.get_connection()?;
+        let conn = self.conn.lock().unwrap();
 
         // Initialize Schema
         conn.execute(
@@ -86,84 +99,30 @@ impl DbClient {
         Ok(())
     }
 
-    pub fn insert_log(&self, entry: &QueryLogEntry, blocklist_param: Option<&str>) -> Result<()> {
-        let conn = self.get_connection()?;
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let client_ip_stripped = entry.client_ip.to_string();
-
-        conn.execute(
-            "INSERT INTO query_logs (
-                timestamp, client_ip, domain, query_type,
-                action, blocklist_name, upstream, latency_ms, ttl_remaining
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                timestamp,
-                client_ip_stripped,
-                entry.domain,
-                entry.query_type.to_string(),
-                format!("{:?}", entry.action), // Enum to string
-                blocklist_param,
-                entry.upstream,
-                entry.latency_ms as i64,
-                entry.ttl_remaining.map(|t| t as i64)
-            ],
-        )?;
-
-        Ok(())
-    }
-
-    pub fn prune_logs(&self, retention_hours: u64) -> Result<()> {
-        let conn = self.get_connection()?;
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let cutoff = timestamp - (retention_hours * 3600) as i64;
-
-        conn.execute(
-            "DELETE FROM query_logs WHERE timestamp < ?1",
-            params![cutoff],
-        )?;
-        Ok(())
-    }
-
     pub fn get_stats(&self) -> StatsSnapshot {
-        let conn = match self.get_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                error!("Failed to open SQLite connection for stats: {}", e);
-                return empty_snapshot();
-            }
-        };
+        let conn = self.conn.lock().unwrap();
 
         let total_queries: u64 = conn
-            .query_row("SELECT COUNT(*) FROM query_logs", [], |r| {
-                r.get::<_, i64>(0)
-            })
+            .prepare_cached("SELECT COUNT(*) FROM query_logs")
+            .unwrap()
+            .query_row([], |r| r.get::<_, i64>(0))
             .unwrap_or(0) as u64;
 
         let blocked_queries: u64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM query_logs WHERE action = 'Blocked'",
-                [],
-                |r| r.get::<_, i64>(0),
-            )
+            .prepare_cached("SELECT COUNT(*) FROM query_logs WHERE action = 'Blocked'")
+            .unwrap()
+            .query_row([], |r| r.get::<_, i64>(0))
             .unwrap_or(0) as u64;
 
         let cache_hits: u64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM query_logs WHERE action = 'Cached'",
-                [],
-                |r| r.get::<_, i64>(0),
-            )
+            .prepare_cached("SELECT COUNT(*) FROM query_logs WHERE action = 'Cached'")
+            .unwrap()
+            .query_row([], |r| r.get::<_, i64>(0))
             .unwrap_or(0) as u64;
 
+        // Helper for basic top lists
         let get_top = |query: &str| -> Vec<TopItem> {
-            let mut stmt = conn.prepare(query).unwrap();
+            let mut stmt = conn.prepare_cached(query).unwrap();
             let rows = stmt
                 .query_map([], |row| {
                     Ok(TopItem {
@@ -183,15 +142,15 @@ impl DbClient {
         let top_blocked_domains = get_top("SELECT domain, COUNT(*) as c FROM query_logs WHERE action = 'Blocked' GROUP BY domain ORDER BY c DESC LIMIT 5");
 
         let started_at: u64 = conn
-            .query_row("SELECT MIN(timestamp) FROM query_logs", [], |r| {
-                r.get::<_, i64>(0)
-            })
+            .prepare_cached("SELECT MIN(timestamp) FROM query_logs")
+            .unwrap()
+            .query_row([], |r| r.get::<_, i64>(0))
             .unwrap_or(0) as u64;
 
         let updated_at: u64 = conn
-            .query_row("SELECT MAX(timestamp) FROM query_logs", [], |r| {
-                r.get::<_, i64>(0)
-            })
+            .prepare_cached("SELECT MAX(timestamp) FROM query_logs")
+            .unwrap()
+            .query_row([], |r| r.get::<_, i64>(0))
             .unwrap_or_else(|_| {
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -213,16 +172,10 @@ impl DbClient {
     }
 
     pub fn get_logs(&self, limit: usize) -> Vec<QueryLogEntry> {
-        let conn = match self.get_connection() {
-            Ok(c) => c,
-            Err(e) => {
-                error!("Failed to open SQLite connection for logs: {}", e);
-                return Vec::new();
-            }
-        };
+        let conn = self.conn.lock().unwrap();
 
         let mut stmt = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT client_ip, domain, query_type, action, blocklist_name, upstream, latency_ms, ttl_remaining 
                  FROM query_logs ORDER BY timestamp DESC LIMIT ?",
             )
@@ -257,17 +210,62 @@ impl DbClient {
     }
 }
 
-fn empty_snapshot() -> StatsSnapshot {
-    StatsSnapshot {
-        total_queries: 0,
-        blocked_queries: 0,
-        cache_hits: 0,
-        top_clients: vec![],
-        top_blocked_clients: vec![],
-        top_domains: vec![],
-        top_blocked_domains: vec![],
-        started_at: 0,
-        updated_at: 0,
+impl LogWriter {
+    pub fn new(db_path: &str) -> Result<Self> {
+        let conn = Connection::open(db_path)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        Ok(Self { conn })
+    }
+
+    pub fn insert_log(
+        &mut self,
+        entry: &QueryLogEntry,
+        blocklist_param: Option<&str>,
+    ) -> Result<()> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let client_ip_stripped = entry.client_ip.to_string();
+
+        let mut stmt = self.conn.prepare_cached(
+            "INSERT INTO query_logs (
+                timestamp, client_ip, domain, query_type,
+                action, blocklist_name, upstream, latency_ms, ttl_remaining
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )?;
+
+        stmt.execute(params![
+            timestamp,
+            client_ip_stripped,
+            entry.domain,
+            entry.query_type.to_string(),
+            format!("{:?}", entry.action), // Enum to string
+            blocklist_param,
+            entry.upstream,
+            entry.latency_ms as i64,
+            entry.ttl_remaining.map(|t| t as i64)
+        ])?;
+
+        Ok(())
+    }
+
+    pub fn prune_logs(&mut self, retention_hours: u64) -> Result<()> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let cutoff = timestamp - (retention_hours * 3600) as i64;
+
+        // Pruning happens less frequently, but we can still cache it
+        let mut stmt = self
+            .conn
+            .prepare_cached("DELETE FROM query_logs WHERE timestamp < ?1")?;
+
+        stmt.execute(params![cutoff])?;
+        Ok(())
     }
 }
 

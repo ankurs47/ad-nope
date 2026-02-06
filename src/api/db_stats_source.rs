@@ -8,17 +8,16 @@ use crate::db::DbClient;
 use crate::logger::types::QueryLogEntry;
 use crate::stats::StatsSnapshot;
 use async_trait::async_trait;
-use std::sync::Arc;
 
 /// An API data source that reads from a persistent SQLite database.
 pub struct PersistentStatsSource {
     /// Client for database operations.
-    db: Arc<DbClient>,
+    db: DbClient,
 }
 
 impl PersistentStatsSource {
     /// Creates a new `PersistentStatsSource`.
-    pub fn new(db: Arc<DbClient>) -> Self {
+    pub fn new(db: DbClient) -> Self {
         Self { db }
     }
 }
